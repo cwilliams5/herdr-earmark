@@ -7,6 +7,7 @@ with what Herdr reports now: a noted pane that's gone was closed (with its
 tab or workspace), and a noted pane whose agent left was exited.
 """
 import os
+import sys
 import time
 
 from . import agents, config, herdr, store
@@ -275,5 +276,5 @@ def send_reports(reports):
     for wid, text in reports:
         try:
             herdr.report_count(wid, text)
-        except herdr.HerdrError:
-            pass
+        except herdr.HerdrError as e:
+            print(f"earmark: sidebar count for {wid}: {e}", file=sys.stderr)  # shows in `herdr plugin log`

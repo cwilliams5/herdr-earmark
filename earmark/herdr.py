@@ -68,15 +68,12 @@ def run_in_pane(pane_id, argv):
 
 
 def report_count(workspace_id, text):
-    """Set or clear the $earmark sidebar token on one workspace."""
+    """Set or clear the $earmark sidebar token on one workspace. Herdr's CLI
+    takes the workspace id before the options (0.9.5 rejects it last)."""
     from . import PLUGIN_ID
-    seq = str(time_ns())
-    if text:
-        run("workspace", "report-metadata", "--source", PLUGIN_ID, "--seq", seq,
-            "--token", f"earmark={text}", workspace_id)
-    else:
-        run("workspace", "report-metadata", "--source", PLUGIN_ID, "--seq", seq,
-            "--clear-token", "earmark", workspace_id)
+    args = ["workspace", "report-metadata", workspace_id, "--source", PLUGIN_ID, "--seq", str(time_ns())]
+    args += ["--token", f"earmark={text}"] if text else ["--clear-token", "earmark"]
+    run(*args)
 
 
 def time_ns():
