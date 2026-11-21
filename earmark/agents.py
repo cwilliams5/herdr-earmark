@@ -28,8 +28,11 @@ RESUME = {
     # Herdr's table says `codex resume <id>`. --no-daemon keeps the reopened
     # Codex out of its shared app-server daemon, which reports sessions to
     # whichever pane started the daemon (herdrdev/herdr#4649, open as of
-    # Herdr 0.9.5 / Codex 0.171). Drop it once that's fixed.
-    "codex": ["codex", "--no-daemon", "resume", "{id}"],
+    # Herdr 0.9.5 / Codex 0.171). `command` skips a user's codex alias or
+    # function, which may add --no-daemon already (Codex rejects it twice).
+    # The command is typed into the tab's shell, so `command` works there.
+    # Drop both once that issue is fixed.
+    "codex": ["command", "codex", "--no-daemon", "resume", "{id}"],
     "cursor": ["cursor-agent", "--resume", "{id}"],
     "grok": ["grok", "--resume", "{id}"],
     "copilot": ["copilot", "--resume={id}"],

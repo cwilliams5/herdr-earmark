@@ -114,6 +114,9 @@ tests/
   test_core.py      unit tests (python3 -m unittest discover tests)
   live_check.sh     end-to-end against a throwaway named Herdr session
 branding/           logo system (build.py), the pick in eartag/, alternatives/
+media/              README images: hero.png, workspaces.png, reopen.gif,
+                    restore.gif (shot 2026-11-21 in a staged named Herdr
+                    session "earmark-demo" with its own config, see PLAN log)
 docs/PLAN.md        the development plan and log
 ```
 

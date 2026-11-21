@@ -244,3 +244,15 @@ Log, and CLAUDE.md's platform facts are corrected from it.
   tests 35, live check 20/20 with Codex and Grok. Found that a Codex
   app-server daemon my first Codex test started still carries the test
   session's socket; stopping it was left to Cody.
+- 2026-11-21: go-public stage 2. README written; media shot in a staged
+  named session (`earmark-demo`, HERDR_CONFIG_PATH pointing at a copy of
+  Cody's Herdr config without the hostname in the tab bar; demo project in
+  /tmp/demo with real one-exchange Claude/Codex/Grok sessions; Claude's
+  status line hidden with a project .claude/settings.json; Claude
+  transcripts and closed-workspace times backdated for realistic ages).
+  All driven by Herdr's CLI and socket API (popup.close), no scripted
+  input. The shoot found popup layout bugs (titles running into details,
+  a doubled "Earmark", details dropped when narrow, help cut mid-word,
+  space before …), fixed in ui.py; popup size now 90% x 70%. Codex reopen
+  is `command codex --no-daemon resume`, so a user's codex alias or
+  function can't double the flag.

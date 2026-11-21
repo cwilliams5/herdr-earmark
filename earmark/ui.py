@@ -24,9 +24,27 @@ BUTTON5_PRESSED = getattr(curses, "BUTTON5_PRESSED", 0x200000)  # wheel down
 FORGET_COL = 3  # the × and its margin at the right edge of each row
 VIEWS = (("sessions", "Sessions"), ("workspaces", "Workspaces"))
 HELP = {
-    "sessions": "Enter reopen · Del forget · / filter · a all workspaces · Tab workspaces · Esc close",
-    "workspaces": "Enter restore · Del forget · / filter · Tab sessions · Esc close",
+    "sessions": ["Enter reopen", "Del forget", "/ filter", "a all workspaces", "Tab workspaces", "Esc close"],
+    "workspaces": ["Enter restore", "Del forget", "/ filter", "Tab sessions", "Esc close"],
 }
+
+
+def fit(text, width):
+    """Cut text to width, ending in … when anything was cut."""
+    if width <= 0:
+        return ""
+    return text if len(text) <= width else text[: max(0, width - 1)].rstrip() + "…"
+
+
+def fit_parts(parts, width, sep=" · "):
+    """As many whole parts as fit, in order (a help line never ends mid-word)."""
+    out = ""
+    for part in parts:
+        candidate = part if not out else out + sep + part
+        if len(candidate) > width:
+            break
+        out = candidate
+    return out
 
 
 def ago(t, now=None):
@@ -49,7 +67,7 @@ def tab_count(record):
     n = len(record.get("tabs") or [])
     agents_n = sum(1 for tb in record.get("tabs") or [] if tb.get("session_id"))
     text = f"{n} tab{'s' if n != 1 else ''}"
-    return text + (f", {agents_n} with agents" if agents_n else "")
+    return text + (f" ({agents_n} agent{'s' if agents_n != 1 else ''})" if agents_n else "")
 
 
 class Popup:
@@ -127,19 +145,22 @@ class Popup:
             if self.view == "workspaces":
                 primary = r["label"] or "(unnamed workspace)"
                 secondary = ""
-                detail = f"{tab_count(r)}  ·  closed {ago(r.get('closed_at'), now)}"
+                when = ago(r.get("closed_at"), now)
+                details = [f"{tab_count(r)} · closed {when}", f"{tab_count(r)} · {when}", when]
             else:
                 primary, secondary = core.names(r, self.cfg["title_first"])
-                detail = f"{r['agent']}  {ago(r.get('last_active'), now):>13}"
+                when = ago(r.get("last_active"), now)
+                details = [f"{r['agent']}  {when:>12}", when]
                 if self.all:
-                    detail = f"{r.get('workspace_label') or '?'}  ·  " + detail
-            self.draw_row(scr, 2 + i, w, attr, selected, primary, secondary, detail)
+                    details.insert(0, f"{r.get('workspace_label') or '?'} · {r['agent']}  {when:>12}")
+            self.draw_row(scr, 2 + i, w, attr, selected, primary, secondary, details)
         self.draw_footer(scr, h, w)
         scr.refresh()
 
     def draw_header(self, scr, w):
-        scr.addnstr(0, 0, " Earmark ", w - 1, curses.A_BOLD)
-        x = 10
+        # Herdr's popup border already carries the name, so the header is
+        # just the two views and what's in the current one.
+        x = 1
         self.view_tabs = {}
         for view, name in VIEWS:
             label = f" {name} "
@@ -156,15 +177,23 @@ class Popup:
         if x + len(right) + 2 < w:
             scr.addnstr(0, w - 1 - len(right), right, len(right), curses.A_DIM)
 
-    def draw_row(self, scr, y, w, attr, selected, primary, secondary, detail):
-        room = w - len(detail) - FORGET_COL - 4
-        if room < 10:  # narrow: drop the detail
-            detail, room = "", w - FORGET_COL - 3
+    def draw_row(self, scr, y, w, attr, selected, primary, secondary, details):
+        """One row: "› name  other name ... detail  ×". The names get at least
+        16 columns; the detail falls back to shorter forms, then goes."""
+        detail = ""
+        for candidate in details:
+            if w - FORGET_COL - len(candidate) - 6 >= 16:
+                detail = candidate
+                break
+        right = w - FORGET_COL - (len(detail) + 2 if detail else 1)  # names end before this
         scr.addnstr(y, 0, " " * (w - 1), w - 1, attr)
-        scr.addnstr(y, 1, ("› " if selected else "  ") + primary[:room], room + 2, attr | curses.A_BOLD)
-        rest = room - len(primary) - 2  # the other name, dimmed, in whatever room is left
-        if secondary and rest > 3:
-            scr.addnstr(y, 3 + len(primary) + 2, secondary[:rest], rest, attr | curses.A_DIM)
+        scr.addnstr(y, 1, "› " if selected else "  ", 2, attr | curses.A_BOLD)
+        name = fit(primary, right - 3)
+        scr.addnstr(y, 3, name, len(name), attr | curses.A_BOLD)
+        rest = right - 3 - len(name) - 2  # the other name, dimmed, in what's left
+        if secondary and rest >= 6:
+            other = fit(secondary, rest)
+            scr.addnstr(y, 3 + len(name) + 2, other, len(other), attr | curses.A_DIM)
         if detail:
             scr.addnstr(y, w - FORGET_COL - len(detail) - 1, detail, len(detail), attr | curses.A_DIM)
         scr.addnstr(y, w - FORGET_COL, " ×", 2, attr)
@@ -195,11 +224,11 @@ class Popup:
                 scr.addnstr(h - 1, x, "(y / Esc)", w - 1 - x, curses.A_DIM)
             return
         if self.filtering:
-            foot = f" Filter: {self.filter}_   (Enter keeps it, Esc clears)"
+            foot = " " + fit(f"Filter: {self.filter}_   (Enter keeps it, Esc clears)", w - 2)
         elif self.message:
-            foot = " " + self.message
+            foot = " " + fit(self.message, w - 2)
         else:
-            foot = " " + HELP[self.view]
+            foot = " " + fit_parts(HELP[self.view], w - 2)
         scr.addnstr(h - 1, 0, foot, w - 1, curses.A_BOLD if self.message else curses.A_DIM)
 
     # ------------------------------------------------------------ actions

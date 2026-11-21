@@ -32,8 +32,8 @@ command = ["python3", "earmark.py", "open-workspaces"]
 id = "archive"
 title = "Earmark"
 placement = "popup"
-width = "80%"
-height = "60%"
+width = "90%"
+height = "70%"
 command = ["python3", "earmark.py", "popup"]
 
 # Herdr's close events carry only ids, so every hook refreshes Earmark's

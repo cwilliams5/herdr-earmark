@@ -174,6 +174,7 @@ class AgentTests(unittest.TestCase):
     def test_resume_commands(self):
         self.assertEqual(agents.resume_argv("claude", "abc"), ["claude", "--resume", "abc"])
         self.assertEqual(agents.resume_argv("copilot", "x"), ["copilot", "--resume=x"])
+        self.assertEqual(agents.resume_argv("codex", "c1"), ["command", "codex", "--no-daemon", "resume", "c1"])
         self.assertEqual(agents.resume_argv("letta", "default:ag1"),
                          ["letta", "--conversation", "default", "--agent", "ag1"])
         self.assertIsNone(agents.resume_argv("mystery", "x"))
