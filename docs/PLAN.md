@@ -44,7 +44,7 @@ Herdr reports sessions for, cleans up after itself, is tested, and the
 Nothing here is guessed: each check records what Herdr actually does in the
 Log, and CLAUDE.md's platform facts are corrected from it.
 
-- [ ] A1 `herdr-plugin.toml` with the id, an `open` action and a popup pane
+- [x] A1 `herdr-plugin.toml` with the id, an `open` action and a popup pane
       that says hello; `herdr plugin link ~/Work/herdr-earmark`; a
       `[[keys.command]]` binding in Herdr's `config.toml` (pick a free key
       with Cody; Omarchy's prefix is Ctrl+Space). Check: the key opens the
@@ -60,21 +60,21 @@ Log, and CLAUDE.md's platform facts are corrected from it.
       `herdr server stop` and start again (or ask Cody to log out and in).
       Do close events fire? A restart must not archive sessions Herdr is
       about to restore.
-- [ ] A4 Context menus: give the action `contexts = ["workspace"]` and ask
+- [x] A4 Context menus: give the action `contexts = ["workspace"]` and ask
       Cody to right-click a workspace and a tab once. If the action appears,
       the right-click entry is back on the table.
-- [ ] A6 Hook rate: `pane.agent_status_changed`, `pane.focused`,
+- [x] A6 Hook rate: `pane.agent_status_changed`, `pane.focused`,
       `tab.focused`, `workspace.focused`, `tab.renamed`, `pane.moved`,
       `tab.moved`, `workspace.created` are valid hooks (link accepted them,
       2026-11-20). Record a normal stretch of use and count how often each
       fires, to choose the index refresh triggers (B1).
-- [ ] A5 Metadata token: report `$earmark` on a scratch workspace with
+- [x] A5 Metadata token: report `$earmark` on a scratch workspace with
       `herdr workspace report-metadata`, add the token to a test sidebar row,
       and show Cody what it looks like.
 
 ### B. Recording
 
-- [ ] B1 Index: keep `index.json` in the state dir, one record per pane
+- [x] B1 Index: keep `index.json` in the state dir, one record per pane
       that has an `agent_session`, keyed by Herdr session name (from
       `HERDR_SESSION`, "default" when unset) + pane id: workspace id and
       label, tab id and label, agent, session source/kind/value, cwd,
@@ -85,75 +85,75 @@ Log, and CLAUDE.md's platform facts are corrected from it.
       Writes are atomic (temp file + rename) and locked (several hook
       processes run at once). Measure the hook rate (A6) before deciding
       which events refresh it.
-- [ ] B2 Archive on close: `pane.closed` archives that pane's record;
+- [x] B2 Archive on close: `pane.closed` archives that pane's record;
       `tab.closed` every record with that tab id; `workspace.closed` every
       record with that workspace id (its payload has the final label). File
       them under session name + workspace (label + id; follow
       `workspace.renamed`). One entry per session: closing a
       reopened session updates its entry instead of adding a second.
-- [ ] B3 Agent gone, tab kept (`/exit`): A2 showed `pane.agent_detected`
+- [x] B3 Agent gone, tab kept (`/exit`): A2 showed `pane.agent_detected`
       with `released: true` and the session already cleared, so archive the
       pane's indexed record on it.
-- [ ] B4 Restart safety from A3: the restored panes get `released: true`
+- [x] B4 Restart safety from A3: the restored panes get `released: true`
       right after `startup`, the same shape as `/exit`. The startup hook
       writes a boot stamp per Herdr session; ignore releases for panes
       that existed at boot until their deferred resume brings the agent
       back (or a grace period passes). Retest in a named session. Also: a session that becomes live again
       (reopened by Earmark, by hand, or restored by Herdr) leaves the
       archive.
-- [ ] B5 Title and last activity: the title from the agent's session name
+- [x] B5 Title and last activity: the title from the agent's session name
       (Claude Code: the terminal title without its status glyph, or the
       transcript's summary/title line), last activity from the transcript
       file's modification time.
 
 ### C. The archive popup
 
-- [ ] C1 A `curses` TUI (stdlib): the current workspace's entries, newest
+- [x] C1 A `curses` TUI (stdlib): the current workspace's entries, newest
       first, each with title, agent and "last active 3 days ago". Keys:
       arrows, Enter reopen, Delete forget (with a one-key confirm), `/`
       filter, `a` toggles all workspaces, Esc/q close. Mouse: click selects,
       double-click reopens, wheel scrolls, a × on each row forgets. Works in
       a narrow popup and follows the terminal's colors (no hard-coded
       palette).
-- [ ] C2 Reopen: `herdr tab create --workspace <id> --cwd <cwd> --label
+- [x] C2 Reopen: `herdr tab create --workspace <id> --cwd <cwd> --label
       <title> --focus`, then run the resume command in its pane; remove the
       entry. The workspace that was closed altogether: reopen into the
       current one, or recreate it (decide with Cody).
-- [ ] C3 Empty state: "Nothing archived in <workspace> yet" with one line on
+- [x] C3 Empty state: "Nothing archived in <workspace> yet" with one line on
       how entries get there.
 
 ### D. Cleanup and settings
 
-- [ ] D1 `config.toml` (read with `tomllib`; Python 3.11+): `keep_days =
+- [x] D1 `config.toml` (read with `tomllib`; Python 3.11+): `keep_days =
       30`, `report_count = true`, and a `[resume]` table of commands per
       agent (`claude = ["claude", "--resume", "{id}"]`, codex, pi, ...).
       Missing file = defaults. Document every key.
-- [ ] D2 Pruning: drop entries past `keep_days` (by last activity),
+- [x] D2 Pruning: drop entries past `keep_days` (by last activity),
       sessions with nothing to resume (Claude: no transcript, or one with
       only local commands such as `/exit`), and entries whose saved
       conversation is gone (Claude Code:
       `~/.claude/projects/*/<id>.jsonl`; add others where known). Runs when
       the popup opens and at startup.
-- [ ] D3 Resume commands for the other agents Herdr integrates (check each
+- [x] D3 Resume commands for the other agents Herdr integrates (check each
       agent's real CLI; never guess a flag).
 
 ### E. Sidebar count (opt-in)
 
-- [ ] E1 Report `$earmark` ("3 archived", empty when none) per workspace
+- [x] E1 Report `$earmark` ("3 archived", empty when none) per workspace
       after each archive change, unless `report_count = false`.
-- [ ] E2 Show Cody with the token added to his sidebar rows; he decides
+- [x] E2 Show Cody with the token added to his sidebar rows; he decides
       whether it stays in his own config.
 
 ### F. Tests and docs
 
-- [ ] F1 Unit tests (`python3 -m unittest`): index, archive, dedupe,
+- [x] F1 Unit tests (`python3 -m unittest`): index, archive, dedupe,
       rename, pruning, config, against a fake `HERDR_BIN_PATH` that serves
       canned JSON.
-- [ ] F2 A live check script for a scratch workspace (open, close, reopen,
+- [x] F2 A live check script for a scratch workspace (open, close, reopen,
       forget), safe to run beside Cody's real sessions.
-- [ ] F3 CLAUDE.md filled in: layout, how it works, working on it, platform
+- [x] F3 CLAUDE.md filled in: layout, how it works, working on it, platform
       facts corrected by phase A.
-- [ ] F4 Cody's dotfiles: `tools.yaml` entry (clone + link), the key
+- [x] F4 Cody's dotfiles: `tools.yaml` entry (clone + link), the key
       binding in Herdr's tracked `config.toml`, docs.
 
 ### G. Closed workspaces (decided 2026-11-21)
@@ -172,7 +172,7 @@ Log, and CLAUDE.md's platform facts are corrected from it.
       and 70 archived comes back as 5 tabs, the 70 stay in its archive).
       Splits are not restored. Closed workspaces age out with keep_days.
 - [x] G4 Unit tests and live_check step 5 (close + restore Gamma).
-- [ ] G5 Cody tries it (Ctrl+Space Shift+A).
+- [x] G5 Cody tries it (Ctrl+Space Shift+A).
 
 ### Release prep (go-public)
 
@@ -221,3 +221,6 @@ Log, and CLAUDE.md's platform facts are corrected from it.
 - 2026-11-21: Sidebar count trial turned off (Cody: default off is right;
   it stays opt-in through the sidebar rows). Built G (closed workspaces);
   12/12 live checks and 24 unit tests pass.
+- 2026-11-22: Cody tried G (works). Plan items A-G ticked. Fixed: restoring a
+  workspace no longer resumes a session that's already open elsewhere.
+  Pre-release review in progress (see the release prep list).

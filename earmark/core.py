@@ -353,6 +353,13 @@ def restore_workspace(record, cfg):
         return str(e)
     target = next((wid for wid, w in snap["workspaces"].items()
                    if (w.get("label") or "") == record["label"]), None)
+    # A session already open elsewhere (reopened on its own since) stays
+    # there: its tab is left out rather than running the session twice.
+    live = {f"{(p.get('agent_session') or {}).get('agent') or p.get('agent')}:{p['agent_session']['value']}"
+            for p in snap["panes"].values() if (p.get("agent_session") or {}).get("value")}
+    tabs = [tb for tb in tabs if not (tb.get("session_id") and f"{tb.get('agent')}:{tb['session_id']}" in live)]
+    if not tabs:
+        return "Its sessions are all open already."
     first_cwd = next((tb["cwd"] for tb in tabs if tb.get("cwd") and os.path.isdir(tb["cwd"])),
                      os.path.expanduser("~"))
     resumed = []

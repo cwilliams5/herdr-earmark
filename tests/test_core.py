@@ -280,5 +280,25 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(archive["workspaces"], {})
 
 
+class RestoreTests(unittest.TestCase):
+    def test_restore_skips_a_session_that_is_already_open(self):
+        record = {"key": "k", "label": "Banana", "tabs": [
+            {"number": 1, "label": "notes", "cwd": "/tmp", "agent": None, "session_id": None},
+            {"number": 2, "label": "agent work", "cwd": "/tmp", "agent": "claude", "session_id": "s1"}]}
+        live = snap([pane("w1:p1", session="s1")])
+        calls = []
+        with mock.patch.object(core.herdr, "snapshot", return_value=live), \
+             mock.patch.object(core.herdr, "run", side_effect=lambda *a: calls.append(a) or {
+                 "workspace": {"workspace_id": "w9"}, "tab": {"tab_id": "w9:t1"}, "root_pane": {"pane_id": "w9:p1"}}), \
+             mock.patch.object(core.herdr, "new_tab", side_effect=lambda *a, **k: calls.append(("new_tab",) + a)), \
+             mock.patch.object(core.herdr, "run_in_pane", side_effect=lambda *a: calls.append(("run_in_pane",) + a)), \
+             mock.patch.object(core.store, "locked", return_value=mock.MagicMock()), \
+             mock.patch.object(core.store, "load_archive", return_value={"entries": {}, "workspaces": {}}), \
+             mock.patch.object(core.store, "save_archive"):
+            self.assertIsNone(core.restore_workspace(record, {"resume": {}}))
+        self.assertFalse(any(c[0] == "run_in_pane" for c in calls), calls)
+        self.assertFalse(any(c[0] == "new_tab" for c in calls), calls)  # only "notes", in the new workspace's first tab
+
+
 if __name__ == "__main__":
     unittest.main()
