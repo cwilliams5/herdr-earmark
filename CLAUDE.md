@@ -10,12 +10,14 @@ Cody's work setup.
 
 ## Status (2026-11-21)
 
-In development, working and live on Cody's Herdr (linked from this clone).
-Done: recording closes (tab, pane, workspace, `/exit`), restart safety,
-the popup with Sessions and Workspaces views, reopen, workspace restore,
-names (user's tab name first), cleanup, the opt-in sidebar count; unit
-tests and `tests/live_check.sh` pass. Next: whatever Cody's daily use turns
-up, then the release prep in `docs/PLAN.md`. Repo private until `go-public`.
+Release prep: development is done for 1.0 (phases A-H of `docs/PLAN.md`)
+and the `go-public` skill is under way (stage 1: scope, media plan).
+Live on Cody's Herdr from this clone. Tests: 35 unit tests, and
+`tests/live_check.sh` 20/20 with Codex and Grok. Repo private until
+`go-public` publishes it. Later, not in 1.0: a right-click menu entry (if
+Herdr ever allows it), facts for Pi, Copilot and the other agents,
+dropping the Codex `--no-daemon` workaround once herdrdev/herdr#4649 is
+fixed.
 
 ## What Earmark is
 
@@ -268,7 +270,10 @@ Herdr 0.9.5 (Omarchy 4.5.0, Claude Code 2.1.330):
 Everything Earmark builds on or borrows from. Add each one when it lands,
 not at release.
 
-- Herdr's plugin API and CLI: the whole host surface (https://herdr.dev).
+- Herdr's plugin API, CLI and socket API: the whole host surface
+  (https://herdr.dev, https://github.com/herdrdev/herdr).
+- Herdr's table of resume commands per agent ("Native session restore" in
+  its session-state docs): Earmark's defaults copy it.
 - Forge's Archived section: the idea and the workflow
   (https://github.com/cwilliams5/Forge).
 - `douglascorrea/herdr-agent-inbox`: showed that recording closed chats per
@@ -276,6 +281,11 @@ not at release.
   public plugin API (idea only, no code taken).
 - `pedroloch/herdr-undo-close`: documented that `tab.closed` carries no tab
   contents, so state must be indexed before a close (idea only).
+- The `codex --no-daemon` workaround documented in herdrdev/herdr#4649.
+- Claude Code, Codex and Grok's own session files: read (never written) for
+  titles, last activity and whether a session still exists; formats learned
+  from the files themselves.
+- Python's standard library (curses, sqlite3, tomllib where present).
 
 ## Distribution
 
