@@ -3,138 +3,71 @@
 
 Herdr runs this with a subcommand from herdr-plugin.toml:
 
-    open           the "open" action: show the archive popup
-    popup          the popup itself (a terminal UI)
-    record-event   phase A2: log what Herdr reports on an event
+    open     the "open" action (bound to a key): show the archive popup
+    popup    the popup itself
+    hook     every event hook and the startup hook: keep the notes on live
+             panes current and archive what closed
 
-Python standard library only (see CLAUDE.md, rule 1).
+and for people:
+
+    list     print the archive (all Herdr sessions and workspaces)
+    check    print the settings in effect and where Earmark keeps its files
+
+Python standard library only (CLAUDE.md, rule 1).
 """
-import fcntl
 import json
 import os
-import subprocess
 import sys
-import time
 
-PLUGIN_ID = "io.github.cwilliams5.earmark"
-
-
-def herdr(*args):
-    """Run the Herdr CLI that launched us and return its parsed JSON reply."""
-    binary = os.environ.get("HERDR_BIN_PATH") or "herdr"
-    out = subprocess.run([binary, *args], capture_output=True, text=True, timeout=10)
-    if out.returncode != 0:
-        raise RuntimeError(f"herdr {' '.join(args)}: {out.stderr.strip() or out.returncode}")
-    return json.loads(out.stdout) if out.stdout.strip() else None
-
-
-def state_dir():
-    path = os.environ.get("HERDR_PLUGIN_STATE_DIR") or os.path.expanduser(
-        "~/.local/state/earmark-dev")
-    os.makedirs(path, exist_ok=True)
-    return path
-
-
-def context():
-    try:
-        return json.loads(os.environ.get("HERDR_PLUGIN_CONTEXT_JSON") or "{}")
-    except ValueError:
-        return {}
-
-
-def append_jsonl(name, record):
-    """Append one JSON line under a lock: several hooks can run at once."""
-    with open(os.path.join(state_dir(), name), "a", encoding="utf-8") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        f.write(json.dumps(record, ensure_ascii=False) + "\n")
-
-
-# ---------------------------------------------------------------- commands
-
-def cmd_open():
-    herdr("plugin", "pane", "open", "--plugin", PLUGIN_ID, "--entrypoint", "archive")
-
-
-def cmd_record_event():
-    env = {k: v for k, v in os.environ.items()
-           if k.startswith("HERDR_") and k not in ("HERDR_PLUGIN_EVENT_JSON", "HERDR_PLUGIN_CONTEXT_JSON")}
-    record = {
-        "time": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "event": os.environ.get("HERDR_PLUGIN_EVENT"),
-        "payload": _json_env("HERDR_PLUGIN_EVENT_JSON"),
-        "context": _json_env("HERDR_PLUGIN_CONTEXT_JSON"),
-        "env": env,
-    }
-    # What the pane list says at the moment the hook runs: is a closed pane
-    # still listed, and does it still name its session?
-    try:
-        panes = herdr("pane", "list")["result"]["panes"]
-        record["panes_now"] = [
-            {"pane": p.get("pane_id"), "tab": p.get("tab_id"),
-             "agent": p.get("agent"), "session": (p.get("agent_session") or {}).get("value")}
-            for p in panes]
-    except Exception as e:  # recorder only: never fail the hook
-        record["panes_now_error"] = str(e)
-    append_jsonl("events.jsonl", record)
+from earmark import PLUGIN_ID, VERSION, config, core, herdr, store
 
 
 def _json_env(name):
-    raw = os.environ.get(name)
-    if not raw:
-        return None
     try:
-        return json.loads(raw)
+        return json.loads(os.environ.get(name) or "null")
     except ValueError:
-        return raw
+        return None
+
+
+def cmd_open():
+    herdr.run("plugin", "pane", "open", "--plugin", PLUGIN_ID, "--entrypoint", "archive")
 
 
 def cmd_popup():
-    import curses
-
-    ctx = context()
-
-    def draw(screen):
-        curses.set_escdelay(25)
-        curses.curs_set(0)
-        curses.use_default_colors()
-        curses.mousemask(curses.ALL_MOUSE_EVENTS | curses.REPORT_MOUSE_POSITION)
-        last = "nothing yet"
-        while True:
-            screen.erase()
-            lines = [
-                "Earmark (phase A1 check)",
-                "",
-                f"workspace: {json.dumps(ctx.get('workspace'), ensure_ascii=False)[:200]}",
-                f"tab:       {json.dumps(ctx.get('tab'), ensure_ascii=False)[:200]}",
-                f"context keys: {', '.join(sorted(ctx)) or '(none)'}",
-                "",
-                f"last input: {last}",
-                "",
-                "Click anywhere, scroll, or press keys. Esc or q closes.",
-            ]
-            h, w = screen.getmaxyx()
-            for i, line in enumerate(lines[:h]):
-                screen.addnstr(i, 0, line, max(w - 1, 1))
-            screen.refresh()
-            key = screen.get_wch()
-            if key in ("q", "\x1b"):
-                return
-            if key == curses.KEY_MOUSE:
-                try:
-                    _, x, y, _, bstate = curses.getmouse()
-                    last = f"mouse at column {x}, row {y}, buttons {bstate:#x}"
-                except curses.error:
-                    last = "mouse (unreadable)"
-            else:
-                last = f"key {key!r}"
-
-    append_jsonl("popup.jsonl", {"time": time.strftime("%Y-%m-%dT%H:%M:%S"), "context": ctx,
-                                 "env": {k: v for k, v in os.environ.items() if k.startswith("HERDR_")
-                                         and k != "HERDR_PLUGIN_CONTEXT_JSON"}})
-    curses.wrapper(draw)
+    from earmark import ui
+    ui.main(_json_env("HERDR_PLUGIN_CONTEXT_JSON") or {})
 
 
-COMMANDS = {"open": cmd_open, "popup": cmd_popup, "record-event": cmd_record_event}
+def cmd_hook():
+    event = os.environ.get("HERDR_PLUGIN_EVENT") or "startup"
+    core.handle_event(event, _json_env("HERDR_PLUGIN_EVENT_JSON"))
+
+
+def cmd_list():
+    archive = store.load_archive()
+    entries = sorted(archive.get("entries", {}).values(),
+                     key=lambda e: (e["herdr_session"], e["workspace_label"], -(e.get("last_active") or 0)))
+    if not entries:
+        print("The archive is empty.")
+    for e in entries:
+        print(f"{e['herdr_session']} / {e['workspace_label'] or '?'}: {e.get('title') or '(untitled)'}"
+              f"  [{e['agent']} {e['session_id']}]")
+
+
+def cmd_check():
+    cfg = config.load()
+    print(f"Earmark {VERSION}")
+    print(f"settings: {config.config_path()}"
+          f"{'' if os.path.exists(config.config_path()) else ' (not created; defaults in use)'}")
+    for key in ("keep_days", "report_count", "debug_log"):
+        print(f"  {key} = {cfg[key]!r}")
+    for agent, argv in sorted(cfg["resume"].items()):
+        print(f"  resume.{agent} = {argv!r}")
+    print(f"data: {store.state_dir()}")
+    print(f"  {len(store.load_archive().get('entries', {}))} archived sessions")
+
+
+COMMANDS = {"open": cmd_open, "popup": cmd_popup, "hook": cmd_hook, "list": cmd_list, "check": cmd_check}
 
 
 def main(argv):

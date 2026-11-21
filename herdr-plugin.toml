@@ -28,70 +28,39 @@ width = "80%"
 height = "60%"
 command = ["python3", "earmark.py", "popup"]
 
-# --- Phase A2: record what Herdr reports on each event (temporary) ---------
-[[events]]
-on = "pane.created"
-command = ["python3", "earmark.py", "record-event"]
+# Herdr's close events carry only ids, so every hook refreshes Earmark's
+# notes on the live panes, and closes are found by comparing (earmark/core.py).
+[[startup]]
+command = ["python3", "earmark.py", "hook"]
 
 [[events]]
 on = "pane.closed"
-command = ["python3", "earmark.py", "record-event"]
-
-[[events]]
-on = "pane.exited"
-command = ["python3", "earmark.py", "record-event"]
-
-[[events]]
-on = "pane.agent_detected"
-command = ["python3", "earmark.py", "record-event"]
-
-[[events]]
-on = "tab.created"
-command = ["python3", "earmark.py", "record-event"]
+command = ["python3", "earmark.py", "hook"]
 
 [[events]]
 on = "tab.closed"
-command = ["python3", "earmark.py", "record-event"]
+command = ["python3", "earmark.py", "hook"]
 
 [[events]]
 on = "workspace.closed"
-command = ["python3", "earmark.py", "record-event"]
+command = ["python3", "earmark.py", "hook"]
 
 [[events]]
-on = "workspace.renamed"
-command = ["python3", "earmark.py", "record-event"]
-
-[[startup]]
-command = ["python3", "earmark.py", "record-event"]
+on = "pane.agent_detected"
+command = ["python3", "earmark.py", "hook"]
 
 [[events]]
 on = "pane.agent_status_changed"
-command = ["python3", "earmark.py", "record-event"]
+command = ["python3", "earmark.py", "hook"]
 
 [[events]]
 on = "pane.focused"
-command = ["python3", "earmark.py", "record-event"]
+command = ["python3", "earmark.py", "hook"]
 
 [[events]]
-on = "tab.focused"
-command = ["python3", "earmark.py", "record-event"]
-
-[[events]]
-on = "workspace.focused"
-command = ["python3", "earmark.py", "record-event"]
+on = "workspace.renamed"
+command = ["python3", "earmark.py", "hook"]
 
 [[events]]
 on = "tab.renamed"
-command = ["python3", "earmark.py", "record-event"]
-
-[[events]]
-on = "pane.moved"
-command = ["python3", "earmark.py", "record-event"]
-
-[[events]]
-on = "tab.moved"
-command = ["python3", "earmark.py", "record-event"]
-
-[[events]]
-on = "workspace.created"
-command = ["python3", "earmark.py", "record-event"]
+command = ["python3", "earmark.py", "hook"]
