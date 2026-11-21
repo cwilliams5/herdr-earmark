@@ -10,14 +10,14 @@ Cody's work setup.
 
 ## Status (2026-11-21)
 
-Release prep: development is done for 1.0 (phases A-H of `docs/PLAN.md`)
-and the `go-public` skill is under way (stage 1: scope, media plan).
-Live on Cody's Herdr from this clone. Tests: 54 unit tests, and
-`tests/live_check.sh` 20/20 with Codex and Grok. Repo private until
-`go-public` publishes it. Later, not in 1.0: a right-click menu entry (if
-Herdr ever allows it), facts for Pi, Copilot and the other agents,
-dropping the Codex `--no-daemon` workaround once herdrdev/herdr#4649 is
-fixed.
+1.0.0, released and public (cwilliams5/herdr-earmark), MIT. Listed in
+Herdr's marketplace through the `herdr-plugin` topic. Live on Cody's Herdr
+from this clone (linked). Tests: 54 unit tests (Python 3.14 and 3.9) and
+`tests/live_check.sh` 20/20 with Codex and Grok. Later, not in 1.0: a
+right-click menu entry (if Herdr ever allows it), facts for Pi, Copilot and
+the other agents, smarter handling when CLAUDE_CONFIG_DIR differs between
+the shell and Herdr's server, dropping the Codex `--no-daemon` workaround
+once herdrdev/herdr#4649 is fixed.
 
 ## What Earmark is
 

@@ -3,7 +3,7 @@
 
 id = "io.github.cwilliams5.earmark"
 name = "Earmark"
-version = "0.1.0"
+version = "1.0.0"
 min_herdr_version = "0.9.5"
 description = "Closed agent sessions, filed under their Herdr workspace and ready to reopen."
 platforms = ["linux", "macos"]
