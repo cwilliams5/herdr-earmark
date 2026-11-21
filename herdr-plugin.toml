@@ -1,0 +1,97 @@
+# Earmark: closed agent sessions, filed under their Herdr workspace and
+# ready to reopen. See README.md; CLAUDE.md has the design.
+
+id = "io.github.cwilliams5.earmark"
+name = "Earmark"
+version = "0.1.0"
+min_herdr_version = "0.9.5"
+description = "Closed agent sessions, filed under their Herdr workspace and ready to reopen."
+platforms = ["linux", "macos"]
+
+# Bound to a key in the user's Herdr config:
+#   [[keys.command]]
+#   key = "prefix+a"
+#   type = "plugin_action"
+#   command = "io.github.cwilliams5.earmark.open"
+[[actions]]
+id = "open"
+title = "Open the archive"
+description = "Show this workspace's archived agent sessions."
+contexts = ["workspace"]
+command = ["python3", "earmark.py", "open"]
+
+[[panes]]
+id = "archive"
+title = "Earmark"
+placement = "popup"
+width = "80%"
+height = "60%"
+command = ["python3", "earmark.py", "popup"]
+
+# --- Phase A2: record what Herdr reports on each event (temporary) ---------
+[[events]]
+on = "pane.created"
+command = ["python3", "earmark.py", "record-event"]
+
+[[events]]
+on = "pane.closed"
+command = ["python3", "earmark.py", "record-event"]
+
+[[events]]
+on = "pane.exited"
+command = ["python3", "earmark.py", "record-event"]
+
+[[events]]
+on = "pane.agent_detected"
+command = ["python3", "earmark.py", "record-event"]
+
+[[events]]
+on = "tab.created"
+command = ["python3", "earmark.py", "record-event"]
+
+[[events]]
+on = "tab.closed"
+command = ["python3", "earmark.py", "record-event"]
+
+[[events]]
+on = "workspace.closed"
+command = ["python3", "earmark.py", "record-event"]
+
+[[events]]
+on = "workspace.renamed"
+command = ["python3", "earmark.py", "record-event"]
+
+[[startup]]
+command = ["python3", "earmark.py", "record-event"]
+
+[[events]]
+on = "pane.agent_status_changed"
+command = ["python3", "earmark.py", "record-event"]
+
+[[events]]
+on = "pane.focused"
+command = ["python3", "earmark.py", "record-event"]
+
+[[events]]
+on = "tab.focused"
+command = ["python3", "earmark.py", "record-event"]
+
+[[events]]
+on = "workspace.focused"
+command = ["python3", "earmark.py", "record-event"]
+
+[[events]]
+on = "tab.renamed"
+command = ["python3", "earmark.py", "record-event"]
+
+[[events]]
+on = "pane.moved"
+command = ["python3", "earmark.py", "record-event"]
+
+[[events]]
+on = "tab.moved"
+command = ["python3", "earmark.py", "record-event"]
+
+[[events]]
+on = "workspace.created"
+command = ["python3", "earmark.py", "record-event"]

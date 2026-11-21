@@ -130,21 +130,47 @@ Herdr 0.9.5 (Omarchy 4.5.0, Claude Code 2.1.330):
   `agent_session = { source, agent, kind, value }` when an integration has
   reported one (for Claude Code, `value` is the session id), plus `cwd`,
   `foreground_cwd`, `label`, `terminal_title`, `workspace_id`, `tab_id`.
-- **`tab.closed` carries only ids** (`tab_id`, `workspace_id`), per
-  `pedroloch/herdr-undo-close`'s notes; the tab's contents are already gone,
-  so Earmark must record pane sessions before the close. Verify for
-  `pane.closed` too.
-- **Events:** pane `created/updated/closed/focused/moved/exited/
-  agent_detected/agent_status_changed`, tab `created/closed/focused/renamed/
-  moved`, workspace `created/updated/renamed/closed/focused/...`.
-  `workspace.metadata_updated` does not invoke plugin hooks.
+- **What close events carry (verified 2026-11-20, phase A2):** by the time
+  a hook runs, the closed panes are already gone from `pane list`, so
+  Earmark must have recorded each pane's session before the close.
+  - `pane.closed`: `{pane_id, workspace_id}` only.
+  - `tab.closed`: `{tab_id, workspace_id}` only, and no `pane.closed` for
+    the panes it held.
+  - `workspace.closed`: `{workspace_id, workspace: {label, ...}}`, and no tab
+    or pane events for what it held.
+  - `/exit` in Claude Code (tab kept): `pane.agent_detected` with
+    `released: true, final_status`; the pane's `agent_session` is already
+    cleared.
+  - A new agent: `pane.agent_detected {agent}` can arrive about a second
+    before the integration reports the session id.
+- **Restarts (verified, phase A3, in a named test session):** `herdr server
+  stop` fires no close events. On start, the `[[startup]]` hook runs, then
+  each restored agent pane gets `pane.agent_detected` with `released: true`
+  (its resume is deferred) — the same shape as a user's `/exit`. Earmark
+  must not archive those.
+- **Hook events:** `pane.updated` is not a valid plugin hook (`plugin link`
+  warns "unknown event"); it exists only for `events.subscribe` streams.
+  Valid and used: `pane.created/closed/exited/agent_detected`,
+  `tab.created/closed`, `workspace.closed/renamed`. `workspace.metadata_
+  updated` does not invoke hooks either.
+- **Hook environment:** `HERDR_WORKSPACE_ID`, `HERDR_TAB_ID`,
+  `HERDR_PANE_ID` (pane events), `HERDR_SOCKET_PATH`, `HERDR_BIN_PATH`, the
+  plugin dirs, and `HERDR_SESSION` for a named session (unset for the
+  default one).
+- **One plugin, every session:** plugins are global, and the config and
+  state dirs (`~/.config/herdr/plugins/config/<id>`,
+  `~/.local/state/herdr/plugins/<id>`) are shared by all named sessions,
+  whose workspace ids repeat (`w1` in each). Key everything by session name
+  as well as workspace.
 - **Workspace metadata tokens** (`workspace.report_metadata`) render in the
   Space sidebar only where the user's `ui.sidebar.spaces.rows` includes the
   token.
 - **Claude Code** keeps transcripts at
   `~/.claude/projects/<cwd-slug>/<session-id>.jsonl` and deletes them after
   `cleanupPeriodDays` (default 30) of inactivity. Resume: `claude --resume
-  <id>`.
+  <id>`. A session that never got a message writes no transcript at all,
+  and one that only ran `/exit` writes only local-command records: neither
+  has anything to resume, so Earmark skips them.
 - **Herdr workspaces** may share a folder (all of Cody's start in `~/Work`),
   so a session's folder can't identify its workspace; the workspace must be
   recorded at close time.

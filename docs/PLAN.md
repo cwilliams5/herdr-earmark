@@ -49,20 +49,25 @@ Log, and CLAUDE.md's platform facts are corrected from it.
       `[[keys.command]]` binding in Herdr's `config.toml` (pick a free key
       with Cody; Omarchy's prefix is Ctrl+Space). Check: the key opens the
       popup over the current tab, mouse clicks reach it, Esc closes it.
-- [ ] A2 Event recorder: hooks on `pane.closed`, `pane.exited`,
+- [x] A2 Event recorder: hooks on `pane.closed`, `pane.exited`,
       `tab.closed`, `workspace.closed`, `pane.agent_detected`,
       `pane.updated`, `workspace.renamed` that append the raw
       `HERDR_PLUGIN_EVENT_JSON` and env to a log in the state dir. Then, in a
       scratch workspace: start `claude`, close its pane; start it, close
       its tab; `/exit` Claude but keep the tab; close the workspace. Record
       what each event carries (does `pane.closed` still name the session?).
-- [ ] A3 Server restart and shutdown: with the recorder on, run
+- [x] A3 Server restart and shutdown: with the recorder on, run
       `herdr server stop` and start again (or ask Cody to log out and in).
       Do close events fire? A restart must not archive sessions Herdr is
       about to restore.
 - [ ] A4 Context menus: give the action `contexts = ["workspace"]` and ask
       Cody to right-click a workspace and a tab once. If the action appears,
       the right-click entry is back on the table.
+- [ ] A6 Hook rate: `pane.agent_status_changed`, `pane.focused`,
+      `tab.focused`, `workspace.focused`, `tab.renamed`, `pane.moved`,
+      `tab.moved`, `workspace.created` are valid hooks (link accepted them,
+      2026-11-20). Record a normal stretch of use and count how often each
+      fires, to choose the index refresh triggers (B1).
 - [ ] A5 Metadata token: report `$earmark` on a scratch workspace with
       `herdr workspace report-metadata`, add the token to a test sidebar row,
       and show Cody what it looks like.
@@ -70,19 +75,30 @@ Log, and CLAUDE.md's platform facts are corrected from it.
 ### B. Recording
 
 - [ ] B1 Index: keep `index.json` in the state dir, one record per pane
-      that has an `agent_session`: workspace id and label, tab id and label,
-      agent, session source/kind/value, cwd, terminal title, last seen.
-      Refresh it from `pane list` on the hooks that can change it, and
-      rebuild it in a `[[startup]]` hook. Writes are atomic (temp file +
-      rename) and locked (several hook processes can run at once).
-- [ ] B2 Archive on close: when a pane, tab or workspace closes, move its
-      index records into `archive.json` under the workspace (label + id;
-      follow `workspace.renamed`). One entry per session: closing a
+      that has an `agent_session`, keyed by Herdr session name (from
+      `HERDR_SESSION`, "default" when unset) + pane id: workspace id and
+      label, tab id and label, agent, session source/kind/value, cwd,
+      terminal title, last seen. Every hook refreshes it from `pane list`
+      (A2: closes can't be read after the fact). `agent_detected` without
+      `released` polls a few seconds until the session id appears (it
+      arrives just after detection). Rebuild in the `[[startup]]` hook.
+      Writes are atomic (temp file + rename) and locked (several hook
+      processes run at once). Measure the hook rate (A6) before deciding
+      which events refresh it.
+- [ ] B2 Archive on close: `pane.closed` archives that pane's record;
+      `tab.closed` every record with that tab id; `workspace.closed` every
+      record with that workspace id (its payload has the final label). File
+      them under session name + workspace (label + id; follow
+      `workspace.renamed`). One entry per session: closing a
       reopened session updates its entry instead of adding a second.
-- [ ] B3 Agent gone, tab kept (`/exit`): archive too, if A2 shows Herdr
-      clears or replaces the pane's `agent_session`; decide from the A2
-      results and note why.
-- [ ] B4 Restart safety from A3. Also: a session that becomes live again
+- [ ] B3 Agent gone, tab kept (`/exit`): A2 showed `pane.agent_detected`
+      with `released: true` and the session already cleared, so archive the
+      pane's indexed record on it.
+- [ ] B4 Restart safety from A3: the restored panes get `released: true`
+      right after `startup`, the same shape as `/exit`. The startup hook
+      writes a boot stamp per Herdr session; ignore releases for panes
+      that existed at boot until their deferred resume brings the agent
+      back (or a grace period passes). Retest in a named session. Also: a session that becomes live again
       (reopened by Earmark, by hand, or restored by Herdr) leaves the
       archive.
 - [ ] B5 Title and last activity: the title from the agent's session name
@@ -112,8 +128,10 @@ Log, and CLAUDE.md's platform facts are corrected from it.
       30`, `report_count = true`, and a `[resume]` table of commands per
       agent (`claude = ["claude", "--resume", "{id}"]`, codex, pi, ...).
       Missing file = defaults. Document every key.
-- [ ] D2 Pruning: drop entries past `keep_days` (by last activity) and
-      entries whose saved conversation is gone (Claude Code:
+- [ ] D2 Pruning: drop entries past `keep_days` (by last activity),
+      sessions with nothing to resume (Claude: no transcript, or one with
+      only local commands such as `/exit`), and entries whose saved
+      conversation is gone (Claude Code:
       `~/.claude/projects/*/<id>.jsonl`; add others where known). Runs when
       the popup opens and at startup.
 - [ ] D3 Resume commands for the other agents Herdr integrates (check each
@@ -163,3 +181,11 @@ Log, and CLAUDE.md's platform facts are corrected from it.
   --resume`) but stale since July and does much more; the rest are
   undo-close, park-a-tab or transcript search, which group by folder.
   Next: A1.
+- 2026-11-20 late: A1 skeleton linked (popup action, recorder hooks), key
+  Ctrl+Space a bound in Cody's Herdr config. A2 and A3 run in a scratch
+  workspace and a named test session (`herdr --session earmark-test
+  server`, deleted after): close events carry only ids, `/exit` and a
+  restart both show up as `released`, plugin state is shared across
+  sessions. Facts are in CLAUDE.md. The one test transcript (an `/exit`)
+  was moved out of `~/.claude/projects`. Waiting on Cody: A1 (press the
+  key, click in the popup) and A4 (right-click a workspace and a tab).
