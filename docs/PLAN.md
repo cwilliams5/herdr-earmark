@@ -156,6 +156,24 @@ Log, and CLAUDE.md's platform facts are corrected from it.
 - [ ] F4 Cody's dotfiles: `tools.yaml` entry (clone + link), the key
       binding in Herdr's tracked `config.toml`, docs.
 
+### G. Closed workspaces (decided 2026-11-21)
+
+- [x] G1 Keep a tab map per workspace (order, name, folder, agent
+      session), plain tabs included; when a workspace disappears, record it
+      as a unit in `archive["workspaces"]`. Its agent sessions are archived
+      on their own too, as before.
+- [x] G2 A Workspaces view in the same popup (Tab or click to switch),
+      opened directly by the `open-workspaces` action: Ctrl+Space Shift+A.
+      Enter or double-click restores: into a live workspace of that name,
+      else a new one; tabs in order with their names and folders; agent
+      tabs resume their sessions; then the record goes. × forgets only the
+      grouping (its sessions stay archived).
+- [x] G3 Restore brings back exactly the tabs open at close (Banana: 5 live
+      and 70 archived comes back as 5 tabs, the 70 stay in its archive).
+      Splits are not restored. Closed workspaces age out with keep_days.
+- [x] G4 Unit tests and live_check step 5 (close + restore Gamma).
+- [ ] G5 Cody tries it (Ctrl+Space Shift+A).
+
 ### Release prep (go-public)
 
 - [ ] CLAUDE.md current: status, rules, platform facts, Credits
@@ -200,3 +218,6 @@ Log, and CLAUDE.md's platform facts are corrected from it.
   sessions, restoring the workspace should bring back the 5 as tabs and
   leave the 70 in its archive, so a workspace close must be remembered as a
   unit, separate from sessions closed one by one.
+- 2026-11-21: Sidebar count trial turned off (Cody: default off is right;
+  it stays opt-in through the sidebar rows). Built G (closed workspaces);
+  12/12 live checks and 24 unit tests pass.

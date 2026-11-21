@@ -8,11 +8,14 @@ name, logo and palette). The reasons below matter as much as the rules.
 This file becomes public with the repo: no personal details, nothing about
 Cody's work setup.
 
-## Status (2026-11-20)
+## Status (2026-11-21)
 
-Identity done (name, logo, palette in `branding/`), development starting at
-phase A of `docs/PLAN.md`. Nothing is built yet. The repo is private until
-the `go-public` skill publishes it. Waiting on Cody: nothing.
+In development, working and live on Cody's Herdr (linked from this clone).
+Done: recording closes (tab, pane, workspace, `/exit`), restart safety,
+the popup with Sessions and Workspaces views, reopen, workspace restore,
+names (user's tab name first), cleanup, the opt-in sidebar count; unit
+tests and `tests/live_check.sh` pass. Next: whatever Cody's daily use turns
+up, then the release prep in `docs/PLAN.md`. Repo private until `go-public`.
 
 ## What Earmark is
 
@@ -34,6 +37,12 @@ gone from Herdr, and the agent's own resume picker groups sessions by
 folder, which doesn't separate workspaces that share one. Earmark does not
 touch live sessions, does not manage the agents' transcripts, and does not
 replace Herdr's own restore-after-restart.
+
+A second view of the same popup (Shift+ the key) lists closed workspaces.
+Restoring one brings back exactly the tabs it had when it closed, in order,
+with their names and folders, agent tabs resuming their sessions; the rest
+of that workspace's archive stays in the archive. Splits are not restored:
+each tab comes back with one pane.
 
 Decided so far (details in `docs/PLAN.md`):
 - **No right-click menu entry.** Herdr 0.9.5 has no documented way for a
@@ -71,7 +80,8 @@ Decided so far (details in `docs/PLAN.md`):
 - Name: Earmark. Repo: `cwilliams5/herdr-earmark`.
 - Ids:
   - Herdr plugin id `io.github.cwilliams5.earmark`
-  - action `open` (key binding target `io.github.cwilliams5.earmark.open`)
+  - actions `open` (key binding target `io.github.cwilliams5.earmark.open`,
+    Cody's Ctrl+Space a) and `open-workspaces` (Ctrl+Space Shift+A)
   - settings: `config.toml` in the plugin's config dir
     (`HERDR_PLUGIN_CONFIG_DIR`, see `herdr plugin config-dir <id>`)
   - archive: `archive.json` in the plugin's state dir
@@ -84,12 +94,22 @@ Decided so far (details in `docs/PLAN.md`):
 ## Layout
 
 ```
-branding/       logo system (build.py), the pick in eartag/, alternatives/
-icon.svg        the app tile
-docs/PLAN.md    the development plan
+herdr-plugin.toml   the manifest: actions, the popup pane, hooks
+earmark.py          entry point: open, open-workspaces, popup, hook, list, check
+earmark/
+  herdr.py          the Herdr CLI calls (through HERDR_BIN_PATH)
+  store.py          index.json / archive.json in the state dir, one lock
+  core.py           notes on live panes, close detection, archive, prune,
+                    reopen, closed workspaces and restore, sidebar counts
+  agents.py         resume commands (Herdr's table), Claude transcript facts
+  config.py         config.toml (every key documented there)
+  ui.py             the curses popup (Sessions / Workspaces views)
+tests/
+  test_core.py      unit tests (python3 -m unittest discover tests)
+  live_check.sh     end-to-end against a throwaway named Herdr session
+branding/           logo system (build.py), the pick in eartag/, alternatives/
+docs/PLAN.md        the development plan and log
 ```
-
-(Development fills this in.)
 
 ## Rules that must not be broken (and why)
 
@@ -106,11 +126,37 @@ docs/PLAN.md    the development plan
 
 ## How it works, in one screen
 
-(Development fills this in. The planned shape: event hooks keep a record of
-each pane's agent session as Herdr reports it; when a pane or tab closes,
-its last record moves into the archive under its workspace; the `open`
-action shows a popup pane listing the current workspace's archive and opens
-a new tab running the resume command for the chosen one.)
+- **Notes, not events.** Herdr's close events carry only ids, so every hook
+  (`pane.focused`, `pane.agent_detected`, `pane.agent_status_changed`,
+  closes, renames, startup) takes a snapshot (`pane list`, `workspace
+  list`, `tab list`) under a lock and compares it with `index.json`:
+  - a noted agent pane that's gone was closed: archive it;
+  - a noted pane whose agent was `released` was exited: archive it, unless
+    it existed at the startup hook less than `BOOT_GRACE` (60 s) ago (a
+    restored pane waiting for its deferred resume);
+  - a different session in a noted pane (`/clear`, `/resume`): archive the
+    old one;
+  - a workspace in the last tab map that's gone was closed: record it in
+    `archive["workspaces"]` with its tabs (order, name, folder, agent
+    session), separately from the per-session entries;
+  - any archived session that's live again leaves the archive.
+- **Archive entries** are keyed `agent:session_id` and carry the Herdr
+  session name ("default" unless `HERDR_SESSION`), workspace id and label,
+  tab name, pane name, tab position, cwd, the agent's title, closed_at and
+  last_active. Sessions with nothing to resume (Claude: no transcript, or
+  only `/exit`) are never archived.
+- **The popup** (`[[panes]]` popup; the `EARMARK_VIEW` env picks the view)
+  prunes first (keep_days by last activity; Claude transcripts that are
+  gone), lists by workspace label, and reopens with `herdr tab create` +
+  `herdr pane run <resume argv>`. Restore creates the workspace (or uses a
+  live one with the same name), renames its first tab, adds the rest, and
+  resumes agent tabs whose session still exists.
+- **Names:** `core.names()` shows the user's pane or tab name first (Herdr's
+  default labels, "Initial" or a number, don't count), the agent's title
+  dimmed after it; `title_first = "agent"` swaps them.
+- **Sidebar count:** after a change, `workspace report-metadata <id>
+  --source <plugin id> --token earmark=...` (the id must come first). Shown
+  only if the user adds `$earmark` to `ui.sidebar.spaces.rows`.
 
 ## Platform facts this depends on (re-check after updates)
 
@@ -177,8 +223,20 @@ Herdr 0.9.5 (Omarchy 4.5.0, Claude Code 2.1.330):
 
 ## Working on it
 
-(Development fills this in: `herdr plugin link`, the test setup, logs via
-`herdr plugin log list --plugin io.github.cwilliams5.earmark`.)
+- The clone is linked: `herdr plugin link ~/Work/herdr-earmark` (re-run
+  after editing `herdr-plugin.toml`; code changes apply on the next hook or
+  popup, no reload needed).
+- `python3 -m unittest discover tests`: fast, never touches Herdr.
+- `tests/live_check.sh`: about two minutes against a throwaway named session
+  (`earmark-live-check`) with real Claude Code sessions (one-word prompts
+  in `/tmp/earmark-live-check`, which Claude Code is told to trust); it
+  removes the session, its transcripts and its archive entries afterwards.
+  Never test closes in Cody's own session: his real tabs get archived.
+- `python3 earmark.py list` / `check` show the archive and the settings in
+  effect; `debug_log = true` in config.toml logs every hook's event to
+  `events.jsonl` in the state dir; hook errors are in `herdr plugin log list
+  --plugin io.github.cwilliams5.earmark`.
+- The popup needs a person: ask Cody to press the keys and click.
 
 ## Credits
 
