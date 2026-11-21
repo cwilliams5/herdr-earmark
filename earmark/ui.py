@@ -69,6 +69,7 @@ class Popup:
         self.rows = []
         self.buttons = {}  # footer buttons while confirming: name -> (x0, x1)
         self.view_tabs = {}  # header view names: view -> (x0, x1)
+        self.scr = None
         self.load()
 
     # ---------------------------------------------------------------- data
@@ -213,6 +214,8 @@ class Popup:
             return False
         if self.view == "workspaces":
             self.message = f"Restoring {r['label'] or 'the workspace'}..."
+            if self.scr is not None:
+                self.draw(self.scr)  # restoring several tabs takes a moment
             error = core.restore_workspace(r, self.cfg)
         else:
             error = core.reopen(r, self.ctx, self.cfg)
@@ -330,6 +333,7 @@ class Popup:
     # --------------------------------------------------------------- loop
 
     def run(self, scr):
+        self.scr = scr
         curses.set_escdelay(25)
         curses.curs_set(0)
         curses.use_default_colors()

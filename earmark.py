@@ -67,8 +67,15 @@ def cmd_check():
     print(f"Earmark {VERSION}")
     print(f"settings: {config.config_path()}"
           f"{'' if os.path.exists(config.config_path()) else ' (not created; defaults in use)'}")
+    problem = config.check()
+    if problem:
+        print(f"  PROBLEM, defaults in use: {problem}")
     for key in ("keep_days", "report_count", "title_first", "debug_log"):
-        print(f"  {key} = {cfg[key]!r}")
+        if key == "keep_days" and cfg[key] is None:
+            print(f"  keep_days unset: as long as the agent keeps a session; "
+                  f"{config.FALLBACK_DAYS} days where Earmark can't check")
+        else:
+            print(f"  {key} = {cfg[key]!r}")
     for agent, argv in sorted(cfg["resume"].items()):
         print(f"  resume.{agent} = {argv!r}")
     archive = store.load_archive()

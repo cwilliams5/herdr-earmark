@@ -5,21 +5,31 @@ herdr.dev/docs/session-state, Herdr 0.9.5), keyed by the agent names Herdr
 reports (`herdr integration status`). Users can override or add entries in
 config.toml's [resume] table.
 
-Claude Code also gets a deeper look: its transcript tells whether a session
-exists, whether it has anything to resume, its title and its last activity.
-Other agents rely on keep_days alone.
+Some agents also get a deeper look at their own files, which tells whether a
+session still exists, whether it has anything to resume, its title and its
+last activity (`session_facts`): Claude Code (transcripts), Codex (its
+state database) and Grok (session summaries). Formats were read from Claude
+Code 2.1.330, Codex 0.171 and Grok 1.0.92; anything unexpected makes the
+facts "unknown", and an unknown session is kept until keep_days, never
+dropped on a guess. Other agents rely on keep_days alone.
 """
+import calendar
 import glob
 import json
 import os
 import re
+import sqlite3
 
 RESUME = {
     "pi": ["pi", "--session", "{id}"],
     "antigravity-cli": ["agy", "--conversation", "{id}"],
     "omp": ["omp", "--resume={id}"],
     "claude": ["claude", "--resume", "{id}"],
-    "codex": ["codex", "resume", "{id}"],
+    # Herdr's table says `codex resume <id>`. --no-daemon keeps the reopened
+    # Codex out of its shared app-server daemon, which reports sessions to
+    # whichever pane started the daemon (herdrdev/herdr#4649, open as of
+    # Herdr 0.9.5 / Codex 0.171). Drop it once that's fixed.
+    "codex": ["codex", "--no-daemon", "resume", "{id}"],
     "cursor": ["cursor-agent", "--resume", "{id}"],
     "grok": ["grok", "--resume", "{id}"],
     "copilot": ["copilot", "--resume={id}"],
@@ -36,7 +46,9 @@ RESUME = {
 }
 
 # Titles an agent shows before it has a real one: not worth keeping.
-GENERIC_TITLES = {"", "claude", "claude code", "codex", "pi", "grok", "copilot", "shell"}
+GENERIC_TITLES = {"", "claude", "claude code", "codex", "pi", "grok", "copilot", "shell",
+                  # status lines some agents show as the title while they work
+                  "waiting for response…", "waiting for response...", "thinking…", "thinking..."}
 
 
 def resume_argv(agent, session_id, overrides=None):
@@ -50,9 +62,14 @@ def resume_argv(agent, session_id, overrides=None):
 
 
 def clean_title(title, agent=None):
-    """A terminal title without the agent's status glyph ("✳ Fix tests" -> "Fix tests").
-    Returns "" for titles that only name the agent."""
+    """A terminal title without the agent's decorations: Claude Code's status
+    glyph ("✳ Fix tests"), Grok's " - grok" and Codex's " | <folder>"
+    suffixes. Returns "" for titles that only name the agent."""
     title = re.sub(r"^[^\w(\[\"'`]+", "", (title or "")).strip()
+    if agent == "codex" and " | " in title:
+        title = title.rsplit(" | ", 1)[0].strip()
+    if agent and title.lower().endswith(f" - {agent.lower()}"):
+        title = title[: -len(agent) - 3].strip()
     if title.lower() in GENERIC_TITLES or (agent and title.lower() == agent.lower()):
         return ""
     return title
@@ -137,15 +154,89 @@ def claude_title(path, tail_bytes=262144):
     return " ".join(title.split())[:120]
 
 
+UNKNOWN = {"known": False, "exists": True, "has_content": True, "title": "", "last_active": None}
+
+
 def session_facts(agent, session_id):
     """What Earmark can learn about a session from the agent's own files:
     {"known": bool, "exists": bool, "has_content": bool, "title": str,
-    "last_active": float or None}. "known" is False for agents Earmark can't
-    look into; then the rest is unknown and the caller relies on keep_days."""
-    if agent != "claude":
-        return {"known": False, "exists": True, "has_content": True, "title": "", "last_active": None}
+    "last_active": float or None, "source": the file read, when there is
+    one}. "known" is False for agents (or setups)
+    Earmark can't look into; then the rest is a placeholder and the caller
+    relies on keep_days."""
+    reader = {"claude": _claude_facts, "codex": _codex_facts, "grok": _grok_facts}.get(agent)
+    if not reader or not session_id:
+        return dict(UNKNOWN)
+    try:
+        return reader(session_id)
+    except (OSError, ValueError, sqlite3.Error):
+        return dict(UNKNOWN)
+
+
+def _claude_facts(session_id):
+    if not os.path.isdir(os.path.join(_claude_dir(), "projects")):
+        return dict(UNKNOWN)
     path = claude_transcript(session_id)
     if not path:
         return {"known": True, "exists": False, "has_content": False, "title": "", "last_active": None}
     return {"known": True, "exists": True, "has_content": claude_has_content(path),
-            "title": claude_title(path), "last_active": os.path.getmtime(path)}
+            "title": claude_title(path), "last_active": os.path.getmtime(path), "source": path}
+
+
+# ------------------------------------------------------------------- Codex
+
+def _codex_db():
+    home = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
+    dbs = glob.glob(os.path.join(home, "state_*.sqlite"))
+    number = lambda p: int(re.sub(r"\D", "", os.path.basename(p)) or 0)
+    return max(dbs, key=number) if dbs else None
+
+
+def _codex_facts(session_id):
+    """Codex keeps a `threads` table: a generated name, the first message, the
+    last update, and the path of the session's log (its "rollout")."""
+    db = _codex_db()
+    if not db:
+        return dict(UNKNOWN)
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=1)
+    try:
+        row = con.execute("select rollout_path, name, title, first_user_message, updated_at "
+                          "from threads where id = ?", (session_id,)).fetchone()
+    finally:
+        con.close()
+    if not row:
+        return {"known": True, "exists": False, "has_content": False, "title": "", "last_active": None}
+    rollout, name, title, first, updated = row
+    exists = not rollout or os.path.exists(rollout)
+    return {"known": True, "exists": exists, "has_content": bool(first or title),
+            "title": " ".join((name or title or "").split())[:120],
+            "last_active": float(updated) if updated else None, "source": rollout or None}
+
+
+# -------------------------------------------------------------------- Grok
+
+def _iso_to_epoch(text):
+    """2026-11-21T19:19:03.852787919Z -> seconds (Python 3.9 can't parse it)."""
+    m = re.match(r"(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)(?:\.(\d+))?Z?$", text or "")
+    if not m:
+        return None
+    y, mo, d, h, mi, sec, frac = m.groups()
+    return calendar.timegm((int(y), int(mo), int(d), int(h), int(mi), int(sec))) + float(f"0.{frac or 0}")
+
+
+def _grok_facts(session_id):
+    """Grok keeps sessions/<folder>/<id>/summary.json: a generated summary
+    (its title), the last activity and a message count."""
+    home = os.environ.get("GROK_HOME") or os.path.expanduser("~/.grok")
+    if not os.path.isdir(os.path.join(home, "sessions")) or not re.fullmatch(r"[0-9A-Za-z-]+", session_id):
+        return dict(UNKNOWN)
+    hits = glob.glob(os.path.join(glob.escape(home), "sessions", "*", session_id, "summary.json"))
+    if not hits:
+        return {"known": True, "exists": False, "has_content": False, "title": "", "last_active": None}
+    with open(hits[0], encoding="utf-8") as f:
+        summary = json.load(f)
+    title = " ".join((summary.get("session_summary") or "").split())[:120]
+    messages = int(summary.get("num_messages") or 0)
+    last = _iso_to_epoch(summary.get("last_active_at") or summary.get("updated_at")) or os.path.getmtime(hits[0])
+    return {"known": True, "exists": True, "has_content": bool(title) or messages >= 2,
+            "title": title, "last_active": last, "source": hits[0]}

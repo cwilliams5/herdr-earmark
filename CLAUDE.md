@@ -51,11 +51,15 @@ Decided so far (details in `docs/PLAN.md`):
 - **The sidebar count is opt-in.** Earmark can report a workspace metadata
   token (`$earmark`, e.g. "3 archived"); it only shows if the user adds the
   token to their sidebar rows, and a setting turns the reporting off.
-- **Cleanup:** `keep_days`, default 30, counted from a session's last
-  activity (the clock Claude Code's own `cleanupPeriodDays` uses, default
-  30). Before listing, Earmark checks that the agent's saved conversation
-  still exists where it knows where to look, and drops entries that are
-  gone, so a dead session is never offered.
+- **Cleanup follows the agent:** with `keep_days` unset (the default),
+  sessions of agents Earmark can look into (Claude Code, Codex, Grok) stay
+  exactly as long as the agent keeps them, whatever retention the user set
+  there (Claude Code's `cleanupPeriodDays`, default 30); other agents'
+  sessions and closed workspaces go after 30 days. Before listing, Earmark
+  checks the agent's files and drops sessions that are gone, so a dead
+  session is never offered. Each entry remembers the file it was read from
+  and its modification time, and an unchanged file isn't read again (300
+  entries: ~0.6 s uncached, under 1 ms cached).
 
 ## The people and the projects around it
 
@@ -211,6 +215,24 @@ Herdr 0.9.5 (Omarchy 4.5.0, Claude Code 2.1.330):
 - **Workspace metadata tokens** (`workspace.report_metadata`) render in the
   Space sidebar only where the user's `ui.sidebar.spaces.rows` includes the
   token.
+- **Python:** standard library only, and it must run on Python 3.9 (macOS's
+  built-in `python3`): no `tomllib` without the fallback in `config.py`, no
+  3.10+ syntax. Checked 2026-11-21 by running the unit tests and the popup
+  under a temporary `mise exec python@3.9`.
+- **Codex** (0.171): `~/.codex/state_N.sqlite` (highest N), table `threads`:
+  `id`, `rollout_path`, `name` (generated title), `title`/`first_user_message`,
+  `updated_at` (seconds). Its terminal title is "<name> | <folder>". Since
+  0.157 interactive Codex runs sessions in a shared app-server daemon that
+  executes hooks with the environment of the pane that started it, so
+  Herdr's Codex integration reports sessions to that pane or nowhere
+  (herdrdev/herdr#4649, open). Workaround: `codex --no-daemon`; Earmark's
+  resume command for Codex uses it. A daemon started inside a test session
+  keeps that session's socket until it exits.
+- **Grok** (1.0.92): `~/.grok/sessions/<url-encoded folder>/<id>/summary.json`
+  with `session_summary` (generated title, filled in a little after the
+  first answer), `last_active_at` (ISO, nanoseconds), `num_messages`. Its
+  terminal title is "<title> - grok", or a status like "Waiting for
+  response…" while it works. First run in a folder asks to trust it ("y").
 - **Claude Code** keeps transcripts at
   `~/.claude/projects/<cwd-slug>/<session-id>.jsonl` and deletes them after
   `cleanupPeriodDays` (default 30) of inactivity. Resume: `claude --resume
@@ -227,6 +249,9 @@ Herdr 0.9.5 (Omarchy 4.5.0, Claude Code 2.1.330):
   after editing `herdr-plugin.toml`; code changes apply on the next hook or
   popup, no reload needed).
 - `python3 -m unittest discover tests`: fast, never touches Herdr.
+- `EARMARK_AGENTS="codex grok" tests/live_check.sh` adds a close, reopen,
+  close-again cycle per agent (each must be installed and signed in; 20
+  checks pass as of 2026-11-21).
 - `tests/live_check.sh`: about two minutes against a throwaway named session
   (`earmark-live-check`) with real Claude Code sessions (one-word prompts
   in `/tmp/earmark-live-check`, which Claude Code is told to trust); it

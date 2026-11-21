@@ -1,6 +1,7 @@
 """Unit tests for the archive logic. Run: python3 -m unittest discover tests
 
 They use made-up snapshots and never touch a running Herdr."""
+import json
 import os
 import sys
 import tempfile
@@ -204,7 +205,7 @@ class AgentTests(unittest.TestCase):
             self.assertEqual(f1["title"], "Fixing tests")
             self.assertTrue(f2["exists"] and not f2["has_content"])
             self.assertFalse(f3["exists"])
-            self.assertFalse(agents.session_facts("codex", "x")["known"])
+            self.assertFalse(agents.session_facts("pi", "x")["known"])
 
 
 class NameTests(unittest.TestCase):
@@ -298,6 +299,123 @@ class RestoreTests(unittest.TestCase):
             self.assertIsNone(core.restore_workspace(record, {"resume": {}}))
         self.assertFalse(any(c[0] == "run_in_pane" for c in calls), calls)
         self.assertFalse(any(c[0] == "new_tab" for c in calls), calls)  # only "notes", in the new workspace's first tab
+
+
+class MoreAgentTests(unittest.TestCase):
+    def test_codex_facts_from_its_database(self):
+        import sqlite3
+        with tempfile.TemporaryDirectory() as d:
+            rollout = os.path.join(d, "rollout.jsonl")
+            open(rollout, "w").close()
+            con = sqlite3.connect(os.path.join(d, "state_5.sqlite"))
+            con.execute("create table threads (id text, rollout_path text, name text, title text, "
+                        "first_user_message text, updated_at integer)")
+            con.execute("insert into threads values ('c1', ?, 'Confirm OK', 'Reply OK', 'Reply OK', 1795288692)", (rollout,))
+            con.execute("insert into threads values ('c2', '/gone.jsonl', '', 'x', 'x', 1)")
+            con.commit()
+            con.close()
+            with mock.patch.dict(os.environ, {"CODEX_HOME": d}):
+                f1, f2, f3 = (agents.session_facts("codex", i) for i in ("c1", "c2", "c3"))
+        self.assertEqual((f1["exists"], f1["has_content"], f1["title"], f1["last_active"]),
+                         (True, True, "Confirm OK", 1795288692.0))
+        self.assertFalse(f2["exists"])
+        self.assertTrue(f3["known"] and not f3["exists"])
+
+    def test_codex_unknown_schema_is_unknown(self):
+        import sqlite3
+        with tempfile.TemporaryDirectory() as d:
+            con = sqlite3.connect(os.path.join(d, "state_9.sqlite"))
+            con.execute("create table threads (id text)")
+            con.commit()
+            con.close()
+            with mock.patch.dict(os.environ, {"CODEX_HOME": d}):
+                self.assertFalse(agents.session_facts("codex", "c1")["known"])
+
+    def test_grok_facts_from_its_summary(self):
+        with tempfile.TemporaryDirectory() as d:
+            sdir = os.path.join(d, "sessions", "%2Ftmp", "g1")
+            os.makedirs(sdir)
+            with open(os.path.join(sdir, "summary.json"), "w") as f:
+                json.dump({"session_summary": "Fix the build", "num_messages": "4",
+                           "last_active_at": "2026-11-21T19:19:03.852787919Z"}, f)
+            os.makedirs(os.path.join(d, "sessions", "%2Ftmp", "g2"))
+            with open(os.path.join(d, "sessions", "%2Ftmp", "g2", "summary.json"), "w") as f:
+                json.dump({"session_summary": "", "num_messages": "1"}, f)
+            with mock.patch.dict(os.environ, {"GROK_HOME": d}):
+                g1, g2, g3 = (agents.session_facts("grok", i) for i in ("g1", "g2", "g3"))
+        self.assertEqual((g1["title"], g1["has_content"]), ("Fix the build", True))
+        self.assertAlmostEqual(g1["last_active"], 1795288743.852788, places=3)
+        self.assertFalse(g2["has_content"])
+        self.assertFalse(g3["exists"])
+
+    def test_missing_agent_folder_is_unknown(self):
+        with tempfile.TemporaryDirectory() as d:
+            with mock.patch.dict(os.environ, {"GROK_HOME": d, "CLAUDE_CONFIG_DIR": d, "CODEX_HOME": d}):
+                for agent in ("grok", "claude", "codex"):
+                    self.assertFalse(agents.session_facts(agent, "x")["known"], agent)
+
+    def test_titles_lose_agent_decorations(self):
+        self.assertEqual(agents.clean_title("Confirm OK | earmark-live-check", "codex"), "Confirm OK")
+        self.assertEqual(agents.clean_title("Fix the build - grok", "grok"), "Fix the build")
+
+
+class KeepDaysTests(unittest.TestCase):
+    def entry(self, agent, last):
+        return {"herdr_session": "default", "workspace_id": "w1", "workspace_label": "Work", "agent": agent,
+                "session_id": "x", "title": "", "closed_at": last, "last_active": last}
+
+    def test_unset_follows_the_agent_where_known(self):
+        archive = {"entries": {"claude:x": self.entry("claude", T0 - 200 * 86400),
+                               "pi:x": self.entry("pi", T0 - 31 * 86400),
+                               "pi:y": dict(self.entry("pi", T0 - 5 * 86400), session_id="y")}}
+
+        def fake(agent, sid):
+            if agent == "claude":
+                return facts(last=T0 - 200 * 86400)  # still there: Claude keeps it
+            return {"known": False, "exists": True, "has_content": True, "title": "", "last_active": None}
+
+        with mock.patch.object(agents, "session_facts", side_effect=fake):
+            core.prune(archive, {"keep_days": None}, T0)
+        self.assertEqual(sorted(archive["entries"]), ["claude:x", "pi:y"])
+
+
+class ConfigTests(unittest.TestCase):
+    def test_simple_toml_parser(self):
+        from earmark import config
+        data = config.parse_simple_toml(
+            '# Earmark\nkeep_days = 90  # three months\nreport_count = false\ntitle_first = "agent"\n\n'
+            '[resume]\nclaude = ["claude", "--resume", "{id}"]\n')
+        self.assertEqual(data, {"keep_days": 90, "report_count": False, "title_first": "agent",
+                                "resume": {"claude": ["claude", "--resume", "{id}"]}})
+        with self.assertRaises(ValueError):
+            config.parse_simple_toml("keep_days = ninety")
+
+    def test_load_uses_the_fallback_without_tomllib(self):
+        from earmark import config
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "config.toml"), "w") as f:
+                f.write("keep_days = 7\ntitle_first = \"agent\"\n")
+            with mock.patch.dict(os.environ, {"HERDR_PLUGIN_CONFIG_DIR": d}), mock.patch.object(config, "tomllib", None):
+                cfg = config.load()
+        self.assertEqual((cfg["keep_days"], cfg["title_first"]), (7, "agent"))
+
+
+class CacheTests(unittest.TestCase):
+    def test_unchanged_source_is_not_read_again(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = os.path.join(d, "s1.jsonl")
+            open(src, "w").close()
+            archive = {"entries": {"claude:s1": {"herdr_session": "default", "workspace_label": "Work",
+                                                 "agent": "claude", "session_id": "s1", "title": "",
+                                                 "closed_at": T0, "last_active": T0}}}
+            result = dict(facts(title="T", last=T0), source=src)
+            with mock.patch.object(agents, "session_facts", return_value=result) as f:
+                core.prune(archive, {"keep_days": None}, T0)
+                core.prune(archive, {"keep_days": None}, T0)
+                self.assertEqual(f.call_count, 1)
+                os.utime(src, ns=(1, 1))  # the file changed: read it again
+                core.prune(archive, {"keep_days": None}, T0)
+                self.assertEqual(f.call_count, 2)
 
 
 if __name__ == "__main__":

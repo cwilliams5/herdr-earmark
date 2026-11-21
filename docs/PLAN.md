@@ -174,6 +174,22 @@ Log, and CLAUDE.md's platform facts are corrected from it.
 - [x] G4 Unit tests and live_check step 5 (close + restore Gamma).
 - [x] G5 Cody tries it (Ctrl+Space Shift+A).
 
+### H. Pre-release review (2026-11-21)
+
+- [x] H1 Python 3.9 (macOS): settings parser fallback; tests and popup pass
+      under a temporary 3.9.
+- [x] H2 Codex and Grok tested live (close, reopen, close again); facts
+      (title, last activity, still there) for Claude Code, Codex, Grok.
+      Pi and Copilot have no sessions on Cody's machine, so not tested.
+- [x] H3 keep_days unset follows each agent's own retention; 30 days
+      only where Earmark can't look.
+- [x] H4 Speed: cache per entry (file + mtime); 300 entries under 1 ms.
+- [x] H5 A reopened session is noted in its new pane at once (Codex
+      reports only after the next prompt); "Restoring…" shows before it
+      runs; restore leaves out sessions already open.
+- [x] H6 Codex daemon bug (herdrdev/herdr#4649): resume uses
+      `--no-daemon`; README notes for users.
+
 ### Release prep (go-public)
 
 - [ ] CLAUDE.md current: status, rules, platform facts, Credits
@@ -224,3 +240,7 @@ Log, and CLAUDE.md's platform facts are corrected from it.
 - 2026-11-22: Cody tried G (works). Plan items A-G ticked. Fixed: restoring a
   workspace no longer resumes a session that's already open elsewhere.
   Pre-release review in progress (see the release prep list).
+- 2026-11-21 (later): pre-release review H1-H6 done (see phase H). Unit
+  tests 35, live check 20/20 with Codex and Grok. Found that a Codex
+  app-server daemon my first Codex test started still carries the test
+  session's socket; stopping it was left to Cody.

@@ -52,14 +52,14 @@ def pane(pane_id):
 
 
 def new_tab(workspace_id, cwd, label, focus=True):
-    """Open a tab; returns its root pane id."""
+    """Open a tab; returns (tab id, root pane id)."""
     args = ["tab", "create", "--workspace", workspace_id, "--focus" if focus else "--no-focus"]
     if cwd and os.path.isdir(cwd):
         args += ["--cwd", cwd]
     if label:
         args += ["--label", label]
     result = run(*args)
-    return (result.get("root_pane") or result.get("pane"))["pane_id"]
+    return result["tab"]["tab_id"], (result.get("root_pane") or result.get("pane"))["pane_id"]
 
 
 def run_in_pane(pane_id, argv):

@@ -193,6 +193,24 @@ def record_closed_workspace(archive, session, wid, layout, t):
     return True
 
 
+def note_started(session, pane_id, tab_id, workspace_id, workspace_label, tab_label, agent, session_id,
+                 cwd, title, source=None):
+    """Note a session Earmark just started in a pane. Some agents (Codex)
+    report their session to Herdr only after the next prompt, and without a
+    note a reopened tab closed before then wouldn't be archived again."""
+    with store.locked():
+        index = store.load_index()
+        s = index.setdefault("sessions", {}).setdefault(
+            session, {"panes": {}, "workspaces": {}, "boot": 0, "boot_panes": [], "reported": {}})
+        s["panes"][pane_id] = {
+            "pane_id": pane_id, "tab_id": tab_id, "workspace_id": workspace_id,
+            "workspace_label": workspace_label, "tab_label": tab_label or "", "tab_number": None,
+            "pane_label": "", "agent": agent, "session_id": session_id, "source": source,
+            "cwd": cwd, "title": title or "", "seen": now(),
+        }
+        store.save_index(index)
+
+
 def boot_protected(s, pid, t):
     return pid in s.get("boot_panes", []) and t - s.get("boot", 0) < BOOT_GRACE
 
@@ -219,7 +237,29 @@ def archive_note(entries, session, note, t, reason):
         "last_active": facts["last_active"] or note.get("seen") or t,
         "reason": reason,
     }
+    remember_source(entries[key], facts)
     return True
+
+
+def remember_source(entry, facts):
+    """Keep which file the facts came from and when it last changed, so the
+    next prune can skip re-reading a file that hasn't (archived sessions
+    rarely change; 300 of them took ~0.6 s to re-read on every popup)."""
+    source = facts.get("source")
+    try:
+        entry["source"] = [source, os.stat(source).st_mtime_ns] if source else None
+    except OSError:
+        entry["source"] = None
+
+
+def unchanged_since_last_look(entry):
+    source = entry.get("source")
+    if not source:
+        return False
+    try:
+        return os.stat(source[0]).st_mtime_ns == source[1]
+    except OSError:
+        return False
 
 
 # ------------------------------------------------------------------ names
@@ -260,22 +300,32 @@ def prune(archive, cfg, t):
     entries = archive.setdefault("entries", {})
     for key in list(entries):
         e = entries[key]
-        facts = agents.session_facts(e["agent"], e["session_id"])
-        if facts["known"]:
-            if not (facts["exists"] and facts["has_content"]):
-                del entries[key]
-                changed = True
-                continue
-            for field in ("last_active", "title"):
-                if facts[field] and facts[field] != e.get(field):
-                    e[field] = facts[field]
+        if unchanged_since_last_look(e):
+            facts = {"known": True}  # same file, same facts as last time
+        else:
+            facts = agents.session_facts(e["agent"], e["session_id"])
+            if facts["known"]:
+                if not (facts["exists"] and facts["has_content"]):
+                    del entries[key]
                     changed = True
-        if cfg["keep_days"] and t - (e.get("last_active") or e.get("closed_at") or t) > cfg["keep_days"] * 86400:
+                    continue
+                for field in ("last_active", "title"):
+                    if facts[field] and facts[field] != e.get(field):
+                        e[field] = facts[field]
+                        changed = True
+                old = e.get("source")
+                remember_source(e, facts)
+                changed |= e.get("source") != old
+        # keep_days unset: the agent's own retention decides where Earmark can
+        # look (the check above), FALLBACK_DAYS elsewhere.
+        days = cfg["keep_days"] if cfg["keep_days"] is not None else (0 if facts["known"] else config.FALLBACK_DAYS)
+        if days and t - (e.get("last_active") or e.get("closed_at") or t) > days * 86400:
             del entries[key]
             changed = True
     closed = archive.setdefault("workspaces", {})
     for key in list(closed):
-        if cfg["keep_days"] and t - closed[key].get("closed_at", t) > cfg["keep_days"] * 86400:
+        days = cfg["keep_days"] if cfg["keep_days"] is not None else config.FALLBACK_DAYS
+        if days and t - closed[key].get("closed_at", t) > days * 86400:
             del closed[key]
             changed = True
     return changed
@@ -318,11 +368,15 @@ def reopen(entry, ctx, cfg):
     try:
         # The tab's own name comes back; a tab that only had Herdr's default
         # label gets a default label again, not the agent's title.
-        pane_id = herdr.new_tab(target, entry.get("cwd"), custom_name(entry))
+        tab_id, pane_id = herdr.new_tab(target, entry.get("cwd"), custom_name(entry))
         herdr.run_in_pane(pane_id, argv)
     except herdr.HerdrError as e:
         return str(e)
     forget(entry["key"])
+    note_started(herdr.session_name(), pane_id, tab_id, target,
+                 (snap["workspaces"].get(target) or {}).get("label") or entry["workspace_label"],
+                 custom_name(entry), entry["agent"], entry["session_id"], entry.get("cwd"),
+                 entry.get("title"), entry.get("source"))
     return None
 
 
@@ -362,7 +416,7 @@ def restore_workspace(record, cfg):
         return "Its sessions are all open already."
     first_cwd = next((tb["cwd"] for tb in tabs if tb.get("cwd") and os.path.isdir(tb["cwd"])),
                      os.path.expanduser("~"))
-    resumed = []
+    resumed, started = [], []
     try:
         first_pane = first_tab = None
         if target:
@@ -375,11 +429,11 @@ def restore_workspace(record, cfg):
         for i, tab in enumerate(tabs):
             label = "" if is_default_tab_label(tab.get("label"), tab.get("number")) else tab["label"]
             if i == 0 and first_pane:
-                pane_id = first_pane
+                tab_id, pane_id = first_tab, first_pane
                 if label:
                     herdr.run("tab", "rename", first_tab, label)
             else:
-                pane_id = herdr.new_tab(target, tab.get("cwd"), label, focus=(i == 0))
+                tab_id, pane_id = herdr.new_tab(target, tab.get("cwd"), label, focus=(i == 0))
             argv = None
             if tab.get("session_id") and tab.get("agent"):
                 facts = agents.session_facts(tab["agent"], tab["session_id"])
@@ -388,6 +442,7 @@ def restore_workspace(record, cfg):
             if argv:
                 herdr.run_in_pane(pane_id, argv)
                 resumed.append(f"{tab['agent']}:{tab['session_id']}")
+                started.append((pane_id, tab_id, label, tab))
     except herdr.HerdrError as e:
         return str(e)
     with store.locked():
@@ -396,6 +451,9 @@ def restore_workspace(record, cfg):
         for key in resumed:  # live again; the next hook would also drop them
             archive.get("entries", {}).pop(key, None)
         store.save_archive(archive)
+    for pane_id, tab_id, label, tab in started:
+        note_started(herdr.session_name(), pane_id, tab_id, target, record["label"], label,
+                     tab["agent"], tab["session_id"], tab.get("cwd"), "")
     return None
 
 

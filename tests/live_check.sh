@@ -8,7 +8,9 @@
 # archives again; a server restart archives nothing. Then it removes the
 # session, the test transcripts and the test's archive entries.
 #
-# Run from the repo: tests/live_check.sh   (about a minute)
+# Run from the repo: tests/live_check.sh   (about two minutes)
+# Also test other agents (each must be installed and signed in):
+#   EARMARK_AGENTS="codex grok" tests/live_check.sh
 set -u
 cd "$(dirname "$0")/.."
 ROOT=$PWD
@@ -165,3 +167,36 @@ PR=$($H pane list | jq -r --arg w "$NW" '.result.panes[] | select(.workspace_id 
 [ -n "$PR" ] && [ "$(wait_session "$PR")" = "$SIDG" ] && ok "agent tab resumed its session" || bad "session not resumed"
 [ "$(jq --arg s "$S" '[.workspaces[]? | select(.herdr_session == $s)] | length' "$STATE/archive.json")" = 0 ] \
   && ok "closed-workspace record removed" || bad "record still there"
+
+for AG in ${EARMARK_AGENTS:-}; do
+  say "6. $AG: close, reopen through Earmark, close again"
+  r=$($H tab create --workspace "$WS" --cwd "$DIR" --label "$AG-tab" --no-focus)
+  PA=$(echo "$r" | jq -r '.result.root_pane.pane_id')
+  # Codex 0.157+ runs sessions in a shared daemon that reports them to the
+  # wrong pane (herdrdev/herdr#4649); --no-daemon is Herdr's workaround.
+  case "$AG" in codex) $H pane run "$PA" codex --no-daemon >/dev/null ;; *) $H pane run "$PA" "$AG" >/dev/null ;; esac
+  sleep 6
+  SCREEN=$($H pane read "$PA" --source visible 2>/dev/null)
+  if echo "$SCREEN" | grep -qi "trust"; then  # first run in the folder
+    case "$AG" in grok) $H pane send-text "$PA" y >/dev/null ;; *) $H pane send-keys "$PA" down >/dev/null; sleep .3; $H pane send-keys "$PA" enter >/dev/null ;; esac
+    sleep 4
+  fi
+  prompt "$PA" || bad "$AG didn't answer"
+  SA=$(wait_session "$PA") || { bad "$AG reported no session"; continue; }
+  $H tab close "$($H pane get "$PA" | jq -r '.result.pane.tab_id')" >/dev/null; sleep 2
+  T=$(entry "$SA" title)
+  [ -n "$(entry "$SA" session_id)" ] && ok "$AG archived as \"$T\"" || { bad "$AG not archived"; continue; }
+  HERDR_SOCKET_PATH=$SOCK HERDR_SESSION=$S python3 - "$SA" "$ROOT" <<'EOF3' || bad "$AG reopen failed"
+import sys
+sys.path.insert(0, sys.argv[2])
+from earmark import config, core, store
+e = next(dict(v, key=k) for k, v in store.load_archive()["entries"].items() if v["session_id"] == sys.argv[1])
+sys.exit(1 if core.reopen(e, {}, config.load()) else 0)
+EOF3
+  sleep 8
+  PB=$($H pane list | jq -r --arg a "$AG" '.result.panes[] | select(.agent == $a) | .pane_id' | tail -1)
+  $H pane read "$PB" --source recent 2>/dev/null | grep -q "single word OK" && ok "$AG conversation is back" || bad "$AG conversation not shown"
+  [ -z "$(entry "$SA" session_id)" ] && ok "$AG left the archive" || bad "$AG still archived"
+  $H tab close "$($H pane get "$PB" | jq -r '.result.pane.tab_id')" >/dev/null; sleep 2
+  [ -n "$(entry "$SA" session_id)" ] && ok "$AG archived again after closing the reopened tab" || bad "$AG lost after reopen + close"
+done
