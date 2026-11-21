@@ -12,7 +12,7 @@ Cody's work setup.
 
 Release prep: development is done for 1.0 (phases A-H of `docs/PLAN.md`)
 and the `go-public` skill is under way (stage 1: scope, media plan).
-Live on Cody's Herdr from this clone. Tests: 35 unit tests, and
+Live on Cody's Herdr from this clone. Tests: 54 unit tests, and
 `tests/live_check.sh` 20/20 with Codex and Grok. Repo private until
 `go-public` publishes it. Later, not in 1.0: a right-click menu entry (if
 Herdr ever allows it), facts for Pi, Copilot and the other agents,
@@ -205,9 +205,29 @@ Herdr 0.9.5 (Omarchy 4.5.0, Claude Code 2.1.330):
   must not archive those.
 - **Hook events:** `pane.updated` is not a valid plugin hook (`plugin link`
   warns "unknown event"); it exists only for `events.subscribe` streams.
-  Valid and used: `pane.created/closed/exited/agent_detected`,
-  `tab.created/closed`, `workspace.closed/renamed`. `workspace.metadata_
-  updated` does not invoke hooks either.
+  Earmark hooks `pane.closed`, `tab.closed`, `workspace.closed`,
+  `pane.agent_detected`, `pane.agent_status_changed`, `pane.focused`,
+  `workspace.renamed`, `tab.renamed`, plus `[[startup]]`.
+  `workspace.metadata_updated` does not invoke hooks.
+- **Hooks are started by the server, without a shell,** so a hook's parent
+  process is the Herdr server (checked: the recorded pid is `herdr
+  server`'s). Earmark notices a restart from a new parent pid, whichever
+  hook runs first (the restored panes' "released" hooks race the startup
+  hook).
+- **Herdr's CLI scans the whole argv for its global flags** (`-h`,
+  `--help`, `--session[=]`, `--remote[=]`, `--handoff`) before anything
+  else, so a tab or workspace name like `-h` passed with `--label` changes
+  what the command does. Earmark never passes a name starting with `-`.
+- **Session ids** (`agent_session.value`) can be any string up to 512 bytes
+  without control characters, reported by any process in a pane. Earmark
+  types resume commands into a shell, so ids starting with `-` or holding a
+  quote or backslash (fish reads a backslash-quote inside single quotes as
+  a quote) are never archived or reopened.
+- **Tab order:** `tab list` returns tabs in on-screen order; a tab's
+  `number` is fixed at creation and doesn't follow moves.
+- **Workspace labels:** a workspace the user hasn't named is labelled
+  after its folder (or git repo), so two such workspaces in one folder
+  share a label, and Earmark's archive goes by label.
 - **Hook environment:** `HERDR_WORKSPACE_ID`, `HERDR_TAB_ID`,
   `HERDR_PANE_ID` (pane events), `HERDR_SOCKET_PATH`, `HERDR_BIN_PATH`, the
   plugin dirs, and `HERDR_SESSION` for a named session (unset for the

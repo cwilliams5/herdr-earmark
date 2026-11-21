@@ -256,3 +256,22 @@ Log, and CLAUDE.md's platform facts are corrected from it.
   space before …), fixed in ui.py; popup size now 90% x 70%. Codex reopen
   is `command codex --no-daemon resume`, so a user's codex alias or
   function can't double the flag.
+- 2026-11-21: go-public stage 3. Two independent read-only reviews
+  (correctness; security and trust). Confirmed and fixed: /goal-style
+  Claude sessions skipped; rename + close in one snapshot kept the old
+  label; a tab name lost in a snapshot race; restarts noticed only by the
+  startup hook (now also by a new server pid); restore used creation order
+  (now tab-list order); sidebar seq taken after the lock; keep_days = true;
+  fallback parser (quotes in comments, multi-line arrays, bad lines);
+  popup with wide or control characters, selection on empty lists; unsafe
+  session ids (leading "-", quotes for fish) and names starting with "-"
+  (Herdr's global-flag scan); unescaped agent folders and the sqlite URI;
+  Antigravity's agent name "agy"; durable writes, unique .damaged names,
+  malformed entries, private debug log, stale index sessions; the entry's
+  `source` field doubling as the file cache (now `file`); live_check's
+  shared /tmp folder. README: archives go by workspace name (unnamed
+  workspaces in one folder share one), titles can be prompt text,
+  CLAUDE_CONFIG_DIR, keep_days = 0. Deferred: smarter handling when
+  CLAUDE_CONFIG_DIR differs between the shell and Herdr's server.
+  20 new tests, each failing on the old code; 54 unit tests pass on 3.14
+  and 3.9; live check 20/20 with Codex and Grok.

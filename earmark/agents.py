@@ -17,11 +17,15 @@ import calendar
 import glob
 import json
 import os
+import pathlib
 import re
 import sqlite3
 
 RESUME = {
     "pi": ["pi", "--session", "{id}"],
+    # Herdr reports Antigravity CLI sessions as agent "agy" (source
+    # herdr:antigravity_cli); its integration is named antigravity-cli.
+    "agy": ["agy", "--conversation", "{id}"],
     "antigravity-cli": ["agy", "--conversation", "{id}"],
     "omp": ["omp", "--resume={id}"],
     "claude": ["claude", "--resume", "{id}"],
@@ -54,8 +58,25 @@ GENERIC_TITLES = {"", "claude", "claude code", "codex", "pi", "grok", "copilot",
                   "waiting for response…", "waiting for response...", "thinking…", "thinking..."}
 
 
+# A session id Earmark will type into a shell. Herdr accepts any id up to 512
+# bytes without control characters, from any process in a pane, so ids are
+# checked before use: no leading "-" (it would be read as an option), no
+# quote or backslash (fish reads \' inside single quotes as an escaped quote,
+# which breaks the POSIX quoting shlex produces), no control characters.
+# Paths are fine (pi and omp report a session file path).
+_SAFE_ID = re.compile(r"[^\s'\\-][^'\\\x00-\x1f\x7f]{0,511}")
+
+
+def safe_session_id(session_id):
+    return isinstance(session_id, str) and bool(_SAFE_ID.fullmatch(session_id))
+
+
 def resume_argv(agent, session_id, overrides=None):
-    """The command that reopens a session, or None if Earmark doesn't know one."""
+    """The command that reopens a session, or None if Earmark doesn't know one
+    or the session id isn't safe to type into a shell. In a [resume]
+    template, "{id}" must be a whole argument, never inside `sh -c "..."`."""
+    if not safe_session_id(session_id):
+        return None
     if agent == "letta" and session_id.startswith("default:"):
         return ["letta", "--conversation", "default", "--agent", session_id.split(":", 1)[1]]
     template = (overrides or {}).get(agent) or RESUME.get(agent)
@@ -87,7 +108,9 @@ def _claude_dir():
 def claude_transcript(session_id):
     if not re.fullmatch(r"[0-9A-Za-z-]+", session_id or ""):
         return None
-    hits = glob.glob(os.path.join(_claude_dir(), "projects", "*", f"{session_id}.jsonl"))
+    # The folder is escaped: a "[" in it would otherwise turn the search into
+    # a pattern that matches nothing, and every session would look deleted.
+    hits = glob.glob(os.path.join(glob.escape(_claude_dir()), "projects", "*", f"{session_id}.jsonl"))
     return max(hits, key=os.path.getmtime) if hits else None
 
 
@@ -111,19 +134,23 @@ def _real_prompt(record):
 
 
 def claude_has_content(path, max_lines=5000):
-    """True if the transcript holds at least one real prompt (not just /exit)."""
+    """True if the transcript has something to resume: a real prompt, or any
+    answer from Claude (a session started with a slash command such as
+    /goal has answers but no typed prompt). A session that only ran /exit
+    or /model has neither."""
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
             for n, line in enumerate(f):
                 if n >= max_lines:
                     return True  # long transcripts are real conversations
-                if '"user"' not in line:
+                if '"user"' not in line and '"assistant"' not in line:
                     continue
                 try:
-                    if _real_prompt(json.loads(line)):
-                        return True
+                    record = json.loads(line)
                 except ValueError:
                     continue
+                if record.get("type") == "assistant" or _real_prompt(record):
+                    return True
     except OSError:
         return False
     return False
@@ -190,7 +217,7 @@ def _claude_facts(session_id):
 
 def _codex_db():
     home = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
-    dbs = glob.glob(os.path.join(home, "state_*.sqlite"))
+    dbs = glob.glob(os.path.join(glob.escape(home), "state_*.sqlite"))
     number = lambda p: int(re.sub(r"\D", "", os.path.basename(p)) or 0)
     return max(dbs, key=number) if dbs else None
 
@@ -201,17 +228,20 @@ def _codex_facts(session_id):
     db = _codex_db()
     if not db:
         return dict(UNKNOWN)
-    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=1)
+    # A file URI built by pathlib, so "?", "#" or "%" in the path can't break it.
+    con = sqlite3.connect(pathlib.Path(db).resolve().as_uri() + "?mode=ro", uri=True, timeout=1)
     try:
-        row = con.execute("select rollout_path, name, title, first_user_message, updated_at "
+        # Only whether there was a first message is read, not the message.
+        row = con.execute("select rollout_path, name, title, "
+                          "coalesce(first_user_message, '') != '', updated_at "
                           "from threads where id = ?", (session_id,)).fetchone()
     finally:
         con.close()
     if not row:
         return {"known": True, "exists": False, "has_content": False, "title": "", "last_active": None}
-    rollout, name, title, first, updated = row
+    rollout, name, title, had_first, updated = row
     exists = not rollout or os.path.exists(rollout)
-    return {"known": True, "exists": exists, "has_content": bool(first or title),
+    return {"known": True, "exists": exists, "has_content": bool(had_first or title),
             "title": " ".join((name or title or "").split())[:120],
             "last_active": float(updated) if updated else None, "source": rollout or None}
 

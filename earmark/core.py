@@ -21,6 +21,10 @@ BOOT_GRACE = 60
 # How long a newly detected agent may take to report its session id.
 SESSION_WAIT = 8.0
 
+# Notes for a Herdr session (a named one that was deleted, say) nothing has
+# been heard from in this many days are dropped.
+FORGET_SESSION_DAYS = 30
+
 
 def now():
     return time.time()
@@ -48,7 +52,9 @@ def handle_event(event, payload, env=None):
         except herdr.HerdrError:
             return  # Herdr is going away or busy; the next hook catches up
         index, archive = store.load_index(), store.load_archive()
-        changed = apply(index, archive, session, snap, event, data, now())
+        # Hooks are started by the Herdr server itself (no shell), so the
+        # parent process is the server: a new one means Herdr restarted.
+        changed = apply(index, archive, session, snap, event, data, now(), server_pid=os.getppid())
         if event == "startup":
             changed |= prune(archive, cfg, now())
         reports = pending_reports(index, archive, session, snap) if cfg["report_count"] else []
@@ -70,17 +76,29 @@ def _wait_for_session(pane_id):
         time.sleep(0.4)
 
 
-def apply(index, archive, session, snap, event, data, t):
+def apply(index, archive, session, snap, event, data, t, server_pid=None):
     """Bring the notes for one Herdr session up to date with a snapshot, and
     archive what closed or exited. Returns True if the archive changed."""
-    s = index.setdefault("sessions", {}).setdefault(
+    sessions = index.setdefault("sessions", {})
+    s = sessions.setdefault(
         session, {"panes": {}, "workspaces": {}, "boot": 0, "boot_panes": [], "reported": {}})
     entries = archive.setdefault("entries", {})
     changed = False
 
-    if event == "startup":
+    # A restart: the startup hook, or any hook from a new server process. The
+    # restored panes' "released" events race the startup hook for the lock,
+    # so whichever runs first after a restart marks the boot.
+    restarted = event == "startup" or (
+        server_pid is not None and s.get("server_pid") not in (None, server_pid))
+    if server_pid is not None:
+        s["server_pid"] = server_pid
+    if restarted:
         s["boot"], s["boot_panes"] = t, sorted(s["panes"])
         s["reported"] = {}  # sidebar tokens don't survive a restart: send them all again
+    s["seen"] = t
+    for other in [k for k, v in sessions.items()
+                  if k != session and t - v.get("seen", t) > FORGET_SESSION_DAYS * 86400]:
+        del sessions[other]
 
     ws_labels = {wid: w.get("label") or "" for wid, w in snap["workspaces"].items()}
 
@@ -103,6 +121,13 @@ def apply(index, archive, session, snap, event, data, t):
             changed |= record_closed_workspace(archive, session, wid, layout, t)
     s["layouts"] = layouts
 
+    def current(note):
+        # A closing pane's note with its workspace's name as it is now (a
+        # rename and a close can land in the same snapshot).
+        if note.get("workspace_id") in ws_labels:
+            note["workspace_label"] = ws_labels[note["workspace_id"]]
+        return note
+
     live = set()
     for pid, p in snap["panes"].items():
         ref = p.get("agent_session") or {}
@@ -112,15 +137,20 @@ def apply(index, archive, session, snap, event, data, t):
             live.add(f"{agent}:{ref['value']}")
             if note and note["session_id"] != ref["value"]:
                 # A different session in the same pane (/clear, /resume): the old one closed.
-                changed |= archive_note(entries, session, note, t, "replaced")
+                changed |= archive_note(entries, session, current(note), t, "replaced")
                 note = None
+            tab = snap["tabs"].get(p.get("tab_id"))
+            if tab is None and note and note.get("tab_id") == p.get("tab_id"):
+                # The tab closed between Herdr's pane and tab lists: keep its name.
+                tab = {"label": note.get("tab_label"), "number": note.get("tab_number")}
+            tab = tab or {}
             s["panes"][pid] = {
                 "pane_id": pid,
                 "tab_id": p.get("tab_id"),
                 "workspace_id": p.get("workspace_id"),
                 "workspace_label": ws_labels.get(p.get("workspace_id"), (note or {}).get("workspace_label", "")),
-                "tab_label": (snap["tabs"].get(p.get("tab_id")) or {}).get("label") or "",
-                "tab_number": (snap["tabs"].get(p.get("tab_id")) or {}).get("number"),
+                "tab_label": tab.get("label") or "",
+                "tab_number": tab.get("number"),
                 "pane_label": p.get("label") or "",
                 "agent": agent,
                 "session_id": ref["value"],
@@ -135,11 +165,11 @@ def apply(index, archive, session, snap, event, data, t):
             released = (event == "pane.agent_detected" and data.get("released")
                         and data.get("pane_id") == pid)
             if released and not boot_protected(s, pid, t):
-                changed |= archive_note(entries, session, s["panes"].pop(pid), t, "exited")
+                changed |= archive_note(entries, session, current(s["panes"].pop(pid)), t, "exited")
 
     # Noted panes Herdr no longer has were closed, alone or with their tab or workspace.
     for pid in [pid for pid in s["panes"] if pid not in snap["panes"]]:
-        changed |= archive_note(entries, session, s["panes"].pop(pid), t, "closed")
+        changed |= archive_note(entries, session, current(s["panes"].pop(pid)), t, "closed")
 
     # A session that's live again (reopened, resumed by hand, restored) leaves the archive.
     for key in [k for k, e in entries.items() if f"{e['agent']}:{e['session_id']}" in live]:
@@ -151,7 +181,9 @@ def apply(index, archive, session, snap, event, data, t):
 def tab_layouts(snap):
     """Per workspace: its label and its tabs in order, each with its name,
     folder, and the agent session it runs, if any. Splits are not kept: a
-    restored tab gets one pane (CLAUDE.md, "What Earmark is")."""
+    restored tab gets one pane (CLAUDE.md, "What Earmark is"). The order is
+    `tab list`'s, which is the order on screen; a tab's "number" is fixed
+    when it's created and doesn't follow moves."""
     out = {}
     panes_by_tab = {}
     for p in sorted(snap["panes"].values(), key=lambda p: p["pane_id"]):
@@ -174,8 +206,6 @@ def tab_layouts(snap):
         }
         layout = out.setdefault(wid, {"label": w.get("label") or "", "tabs": []})
         layout["tabs"].append(entry)
-    for layout in out.values():
-        layout["tabs"].sort(key=lambda tb: tb["number"] if isinstance(tb["number"], int) else 0)
     return out
 
 
@@ -216,7 +246,10 @@ def boot_protected(s, pid, t):
 
 
 def archive_note(entries, session, note, t, reason):
-    """File a closed pane's session. Sessions with nothing to resume are skipped."""
+    """File a closed pane's session. Sessions with nothing to resume, and
+    session ids that aren't safe to type into a shell, are skipped."""
+    if not agents.safe_session_id(note.get("session_id")):
+        return False
     facts = agents.session_facts(note["agent"], note["session_id"])
     if facts["known"] and not (facts["exists"] and facts["has_content"]):
         return False
@@ -242,22 +275,24 @@ def archive_note(entries, session, note, t, reason):
 
 
 def remember_source(entry, facts):
-    """Keep which file the facts came from and when it last changed, so the
-    next prune can skip re-reading a file that hasn't (archived sessions
-    rarely change; 300 of them took ~0.6 s to re-read on every popup)."""
-    source = facts.get("source")
+    """Keep which file the facts came from and when it last changed (as
+    entry["file"]), so the next prune can skip re-reading a file that hasn't
+    (archived sessions rarely change; 300 of them took ~0.6 s to re-read on
+    every popup). entry["source"] is Herdr's session source, a different
+    thing."""
+    path = facts.get("source")
     try:
-        entry["source"] = [source, os.stat(source).st_mtime_ns] if source else None
+        entry["file"] = [path, os.stat(path).st_mtime_ns] if path else None
     except OSError:
-        entry["source"] = None
+        entry["file"] = None
 
 
 def unchanged_since_last_look(entry):
-    source = entry.get("source")
-    if not source:
+    cached = entry.get("file")
+    if not cached:
         return False
     try:
-        return os.stat(source[0]).st_mtime_ns == source[1]
+        return os.stat(cached[0]).st_mtime_ns == cached[1]
     except OSError:
         return False
 
@@ -300,6 +335,8 @@ def prune(archive, cfg, t):
     entries = archive.setdefault("entries", {})
     for key in list(entries):
         e = entries[key]
+        if isinstance(e.get("source"), list):  # 0.1 kept the file cache under "source"
+            e["file"], e["source"] = e.pop("source"), None
         if unchanged_since_last_look(e):
             facts = {"known": True}  # same file, same facts as last time
         else:
@@ -313,9 +350,9 @@ def prune(archive, cfg, t):
                     if facts[field] and facts[field] != e.get(field):
                         e[field] = facts[field]
                         changed = True
-                old = e.get("source")
+                old = e.get("file")
                 remember_source(e, facts)
-                changed |= e.get("source") != old
+                changed |= e.get("file") != old
         # keep_days unset: the agent's own retention decides where Earmark can
         # look (the check above), FALLBACK_DAYS elsewhere.
         days = cfg["keep_days"] if cfg["keep_days"] is not None else (0 if facts["known"] else config.FALLBACK_DAYS)
@@ -349,6 +386,8 @@ def forget(key):
 def reopen(entry, ctx, cfg):
     """Open a new tab running the session's resume command. Returns the error
     message to show, or None."""
+    if not agents.safe_session_id(entry["session_id"]):
+        return "This session's id isn't safe to type into a shell, so Earmark won't reopen it."
     argv = agents.resume_argv(entry["agent"], entry["session_id"], cfg["resume"])
     if not argv:
         return f"Earmark doesn't know how to reopen {entry['agent']} sessions (add it under [resume] in config.toml)."
@@ -422,12 +461,13 @@ def restore_workspace(record, cfg):
         if target:
             herdr.run("workspace", "focus", target)
         else:
-            created = herdr.run("workspace", "create", "--cwd", first_cwd, "--label", record["label"], "--focus")
+            name = herdr.safe_label(record["label"])
+            created = herdr.run("workspace", "create", "--cwd", first_cwd, *(["--label", name] if name else []), "--focus")
             target = created["workspace"]["workspace_id"]
             first_tab = created["tab"]["tab_id"]
             first_pane = (created.get("root_pane") or created.get("pane"))["pane_id"]
         for i, tab in enumerate(tabs):
-            label = "" if is_default_tab_label(tab.get("label"), tab.get("number")) else tab["label"]
+            label = "" if is_default_tab_label(tab.get("label"), tab.get("number")) else herdr.safe_label(tab["label"])
             if i == 0 and first_pane:
                 tab_id, pane_id = first_tab, first_pane
                 if label:
@@ -464,14 +504,16 @@ def count_text(n):
 
 
 def pending_reports(index, archive, session, snap):
-    """The $earmark sidebar tokens that changed since they were last sent."""
+    """The $earmark sidebar tokens that changed since they were last sent, each
+    with the sequence number Herdr orders them by: taken here, under the
+    lock, so a count worked out later always carries a higher one."""
     s = index["sessions"][session]
     sent = s.setdefault("reported", {})
     out = []
     for wid, w in snap["workspaces"].items():
         text = count_text(len(listing(archive, session, w.get("label") or "")))
         if sent.get(wid) != text:
-            out.append((wid, text))
+            out.append((wid, text, time.time_ns()))
             sent[wid] = text
     for wid in [wid for wid in sent if wid not in snap["workspaces"]]:
         del sent[wid]
@@ -497,8 +539,8 @@ def update_counts(session):
 
 
 def send_reports(reports):
-    for wid, text in reports:
+    for wid, text, seq in reports:
         try:
-            herdr.report_count(wid, text)
+            herdr.report_count(wid, text, seq)
         except herdr.HerdrError as e:
             print(f"earmark: sidebar count for {wid}: {e}", file=sys.stderr)  # shows in `herdr plugin log`

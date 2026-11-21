@@ -51,12 +51,22 @@ def pane(pane_id):
     return run("pane", "get", pane_id)["pane"]
 
 
+def safe_label(label):
+    """A tab or workspace name that's safe to pass on Herdr's command line, or
+    "". Herdr 0.9.5 scans the whole argv for its global flags (-h, --help,
+    --session=..., --remote=...) before anything else, so a name like "-h"
+    or "--session=x" would change what the command does. Such names are
+    left out (the tab gets Herdr's default name)."""
+    label = label or ""
+    return "" if label.startswith("-") else label
+
+
 def new_tab(workspace_id, cwd, label, focus=True):
     """Open a tab; returns (tab id, root pane id)."""
     args = ["tab", "create", "--workspace", workspace_id, "--focus" if focus else "--no-focus"]
     if cwd and os.path.isdir(cwd):
         args += ["--cwd", cwd]
-    if label:
+    if safe_label(label):
         args += ["--label", label]
     result = run(*args)
     return result["tab"]["tab_id"], (result.get("root_pane") or result.get("pane"))["pane_id"]
@@ -67,11 +77,13 @@ def run_in_pane(pane_id, argv):
     run("pane", "run", pane_id, shlex.join(argv))
 
 
-def report_count(workspace_id, text):
+def report_count(workspace_id, text, seq):
     """Set or clear the $earmark sidebar token on one workspace. Herdr's CLI
-    takes the workspace id before the options (0.9.5 rejects it last)."""
+    takes the workspace id before the options (0.9.5 rejects it last).
+    Herdr ignores a lower seq from the same source, so seq is taken when the
+    count is worked out (under Earmark's lock), not when it's sent."""
     from . import PLUGIN_ID
-    args = ["workspace", "report-metadata", workspace_id, "--source", PLUGIN_ID, "--seq", str(time_ns())]
+    args = ["workspace", "report-metadata", workspace_id, "--source", PLUGIN_ID, "--seq", str(seq)]
     args += ["--token", f"earmark={text}"] if text else ["--clear-token", "earmark"]
     run(*args)
 

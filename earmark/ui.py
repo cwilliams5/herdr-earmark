@@ -16,7 +16,9 @@ Colors come from the terminal (and so from the Herdr theme): reverse video
 for the selection and the current view, bold names, dim details.
 """
 import curses
+import re
 import time
+import unicodedata
 
 from . import config, core, herdr, store
 
@@ -29,11 +31,41 @@ HELP = {
 }
 
 
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def clean(text):
+    """Text safe to draw: control characters (tabs, newlines, backspaces,
+    escapes that came in through a title or a name) become spaces."""
+    return _CONTROL.sub(" ", str(text or ""))
+
+
+def char_cols(ch):
+    if unicodedata.combining(ch):
+        return 0
+    return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+
+
+def cols(text):
+    """How many terminal columns text takes (wide characters such as CJK and
+    most emoji take two)."""
+    return sum(char_cols(ch) for ch in text)
+
+
 def fit(text, width):
-    """Cut text to width, ending in … when anything was cut."""
+    """Text cleaned and cut to width columns, ending in … when anything was cut."""
+    text = clean(text)
     if width <= 0:
         return ""
-    return text if len(text) <= width else text[: max(0, width - 1)].rstrip() + "…"
+    if cols(text) <= width:
+        return text
+    used, cut = 0, 0
+    for i, ch in enumerate(text):
+        if used + char_cols(ch) > width - 1:  # leave a column for …
+            break
+        used += char_cols(ch)
+        cut = i + 1
+    return text[:cut].rstrip() + "…"
 
 
 def fit_parts(parts, width, sep=" · "):
@@ -41,10 +73,19 @@ def fit_parts(parts, width, sep=" · "):
     out = ""
     for part in parts:
         candidate = part if not out else out + sep + part
-        if len(candidate) > width:
+        if cols(candidate) > width:
             break
         out = candidate
     return out
+
+
+def put(scr, y, x, text, attr=0):
+    """Draw text; curses refuses a write that reaches the last cell or runs
+    off the screen, and that's never worth crashing the popup for."""
+    try:
+        scr.addstr(y, x, text, attr)
+    except curses.error:
+        pass
 
 
 def ago(t, now=None):
@@ -109,7 +150,10 @@ class Popup:
                 rows = [r for r in rows if any(needle in (text or "").lower() for text in
                         (r.get("title"), core.custom_name(r), r.get("workspace_label")))]
         self.rows = rows
-        self.sel = min(self.sel, max(0, len(rows) - 1))
+        self.clamp()
+
+    def clamp(self):
+        self.sel = max(0, min(self.sel, len(self.rows) - 1))
 
     def switch(self, view):
         if view != self.view:
@@ -122,7 +166,7 @@ class Popup:
         scr.erase()
         h, w = scr.getmaxyx()
         if h < 5 or w < 40:
-            scr.addnstr(0, 0, "Earmark: make this popup bigger", max(1, w - 1))
+            put(scr, 0, 0, fit("Earmark: make this popup bigger", w - 1))
             scr.refresh()
             return
         self.draw_header(scr, w)
@@ -136,7 +180,7 @@ class Popup:
             self.top = self.sel - body + 1
         if not self.rows:
             for i, line in enumerate(self.empty_lines()[:body]):
-                scr.addnstr(2 + i, 2, line, w - 3, curses.A_DIM)
+                put(scr, 2 + i, 2, fit(line, w - 3), curses.A_DIM)
         now = time.time()
         for i, r in enumerate(self.rows[self.top:self.top + body]):
             n = self.top + i
@@ -166,7 +210,7 @@ class Popup:
             label = f" {name} "
             if x + len(label) >= w:
                 break
-            scr.addnstr(0, x, label, len(label), curses.A_REVERSE if view == self.view else curses.A_DIM)
+            put(scr, 0, x, label, curses.A_REVERSE if view == self.view else curses.A_DIM)
             self.view_tabs[view] = (x, x + len(label))
             x += len(label) + 1
         if self.view == "workspaces":
@@ -174,29 +218,30 @@ class Popup:
         else:
             where = "every workspace" if self.all else (self.workspace or "this workspace")
             right = f"{where}{f' · {len(self.rows)} archived' if self.rows else ''} "
-        if x + len(right) + 2 < w:
-            scr.addnstr(0, w - 1 - len(right), right, len(right), curses.A_DIM)
+        room = w - 1 - x - 2
+        if right and room >= 6:
+            right = fit(right, room)
+            put(scr, 0, w - 1 - cols(right), right, curses.A_DIM)
 
     def draw_row(self, scr, y, w, attr, selected, primary, secondary, details):
         """One row: "› name  other name ... detail  ×". The names get at least
         16 columns; the detail falls back to shorter forms, then goes."""
         detail = ""
-        for candidate in details:
-            if w - FORGET_COL - len(candidate) - 6 >= 16:
+        for candidate in (clean(c) for c in details):
+            if w - FORGET_COL - cols(candidate) - 6 >= 16:
                 detail = candidate
                 break
-        right = w - FORGET_COL - (len(detail) + 2 if detail else 1)  # names end before this
-        scr.addnstr(y, 0, " " * (w - 1), w - 1, attr)
-        scr.addnstr(y, 1, "› " if selected else "  ", 2, attr | curses.A_BOLD)
+        right = w - FORGET_COL - (cols(detail) + 2 if detail else 1)  # names end before this
+        put(scr, y, 0, " " * (w - 1), attr)
+        put(scr, y, 1, "› " if selected else "  ", attr | curses.A_BOLD)
         name = fit(primary, right - 3)
-        scr.addnstr(y, 3, name, len(name), attr | curses.A_BOLD)
-        rest = right - 3 - len(name) - 2  # the other name, dimmed, in what's left
+        put(scr, y, 3, name, attr | curses.A_BOLD)
+        rest = right - 3 - cols(name) - 2  # the other name, dimmed, in what's left
         if secondary and rest >= 6:
-            other = fit(secondary, rest)
-            scr.addnstr(y, 3 + len(name) + 2, other, len(other), attr | curses.A_DIM)
+            put(scr, y, 3 + cols(name) + 2, fit(secondary, rest), attr | curses.A_DIM)
         if detail:
-            scr.addnstr(y, w - FORGET_COL - len(detail) - 1, detail, len(detail), attr | curses.A_DIM)
-        scr.addnstr(y, w - FORGET_COL, " ×", 2, attr)
+            put(scr, y, w - FORGET_COL - cols(detail) - 1, detail, attr | curses.A_DIM)
+        put(scr, y, w - FORGET_COL, " ×", attr)
 
     def empty_lines(self):
         if self.filter:
@@ -213,15 +258,16 @@ class Popup:
         if self.confirm:
             text = (" Forget this closed workspace? Its sessions stay archived.  " if self.view == "workspaces"
                     else " Forget this session?  ")
-            scr.addnstr(h - 1, 0, text, w - 1, curses.A_BOLD)
-            x = len(text)
+            text = fit(text, w - 1)
+            put(scr, h - 1, 0, text, curses.A_BOLD)
+            x = cols(text)
             for name, label in (("forget", "[ Forget ]"), ("keep", "[ Keep ]")):
                 if x + len(label) < w:
-                    scr.addnstr(h - 1, x, label, len(label), curses.A_REVERSE if name == "forget" else curses.A_BOLD)
+                    put(scr, h - 1, x, label, curses.A_REVERSE if name == "forget" else curses.A_BOLD)
                     self.buttons[name] = (x, x + len(label))
                 x += len(label) + 2
             if x + 12 < w:
-                scr.addnstr(h - 1, x, "(y / Esc)", w - 1 - x, curses.A_DIM)
+                put(scr, h - 1, x, "(y / Esc)", curses.A_DIM)
             return
         if self.filtering:
             foot = " " + fit(f"Filter: {self.filter}_   (Enter keeps it, Esc clears)", w - 2)
@@ -229,7 +275,7 @@ class Popup:
             foot = " " + fit(self.message, w - 2)
         else:
             foot = " " + fit_parts(HELP[self.view], w - 2)
-        scr.addnstr(h - 1, 0, foot, w - 1, curses.A_BOLD if self.message else curses.A_DIM)
+        put(scr, h - 1, 0, foot, curses.A_BOLD if self.message else curses.A_DIM)
 
     # ------------------------------------------------------------ actions
 
@@ -289,10 +335,12 @@ class Popup:
                     self.switch(view)
             return False
         if b & curses.BUTTON4_PRESSED:
-            self.sel = max(0, self.sel - 1)
+            self.sel -= 1
+            self.clamp()
             return False
         if b & BUTTON5_PRESSED:
-            self.sel = min(len(self.rows) - 1, self.sel + 1)
+            self.sel += 1
+            self.clamp()
             return False
         n = self.row_at(y)
         if n is None:
@@ -356,7 +404,7 @@ class Popup:
             self.all = not self.all
             self.sel = self.top = 0
             self.load()
-        self.sel = max(0, self.sel)
+        self.clamp()
         return False
 
     # --------------------------------------------------------------- loop

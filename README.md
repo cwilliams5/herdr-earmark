@@ -15,7 +15,7 @@ Herdr keeps your coding agents in workspaces and tabs. Close a tab, though, and 
 
 ## What you get
 
-- **An archive for each workspace.** Close a tab running an agent, or `/exit` the agent, and its session is filed under the Herdr workspace it was in. Workspaces that share a folder still get separate archives.
+- **An archive for each workspace.** Close a tab running an agent, or `/exit` the agent, and its session is filed under the Herdr workspace it was in. Archives go by workspace name, so a workspace you close and open again later gets its archive back.
 - **Reopen in one click.** Ctrl+Space then `a` lists this workspace's closed sessions, newest first. Enter or a double-click opens the session in a new tab with its old name, resuming the conversation where it stopped.
 - **Bring back a closed workspace.** Ctrl+Space then Shift+A lists the workspaces you've closed. Restoring one brings back the tabs it had when you closed it, in order, with their names and folders, plain tabs included, and every agent tab resumes its session. Its older archived sessions stay in the archive, so a workspace with 5 open tabs and 70 archived sessions comes back as 5 tabs.
 
@@ -84,7 +84,9 @@ Earmark has no background process. Its hooks run when Herdr reports an event (a 
 - **No right-click menu entry.** Herdr 0.9.5 doesn't let plugins add to its menus; the popup and its two keys are the way in.
 - **Splits aren't restored.** A restored workspace's tabs come back with one pane each.
 - **Only sessions closed after you install Earmark** are in the archive, and only sessions Herdr knows: the agent needs Herdr's integration installed (`herdr integration status`).
-- **Earmark can't keep a session longer than its agent does.** Claude Code deletes conversations after 30 days of inactivity by default (`cleanupPeriodDays` in its settings).
+- **Archives go by workspace name.** Herdr names a workspace you haven't renamed after its folder, so two unnamed workspaces in the same folder share one archive (and a restore goes into whichever is open). Name them to keep them apart.
+- **Earmark can't keep a session longer than its agent does.** Claude Code deletes conversations after 30 days of inactivity by default (`cleanupPeriodDays` in its settings). If you move Claude Code's files with `CLAUDE_CONFIG_DIR`, Herdr's server has to see that variable too, or Earmark finds no conversations and archives none.
+- **Titles can be the start of a prompt.** When an agent hasn't named a session, Earmark shows the beginning of what you typed, up to 120 characters, in its archive file and the popup.
 - **Agents other than Claude Code, Codex and Grok** reopen with Herdr's own resume commands but are untested, and their sessions leave the archive after 30 days rather than following the agent.
 - **Codex** needs `--no-daemon` (see Install) until [herdrdev/herdr#4649](https://github.com/herdrdev/herdr/issues/4649) is fixed.
 - **Linux and macOS only:** the popup uses Python's `curses`, which Windows lacks. macOS is untested, though Earmark runs on Python 3.9, the version macOS ships.
@@ -107,11 +109,11 @@ Settings live in `config.toml` in Earmark's config folder (`herdr plugin config-
 
 | Setting | Default | What |
 |---|---|---|
-| `keep_days` | unset | Forget sessions this many days after their last activity. Unset: sessions of Claude Code, Codex and Grok stay as long as the agent keeps them; other agents' sessions and closed workspaces go after 30 days. `0` keeps everything until the agent's files are gone. |
+| `keep_days` | unset | Forget sessions this many days after their last activity. Unset: sessions of Claude Code, Codex and Grok stay as long as the agent keeps them; other agents' sessions and closed workspaces go after 30 days. `0` keeps sessions until the agent's files are gone, and closed workspaces until you forget them. |
 | `title_first` | `"tab"` | Which name leads in the list: `"tab"` (the name you gave the tab or pane, when there is one) or `"agent"` (the agent's own title). The other is shown dimmed beside it. |
 | `report_count` | `true` | Publish the `$earmark` sidebar token. It's only visible if you add it to your sidebar rows. |
 | `debug_log` | `false` | Log every hook's event to `events.jsonl` in the state folder. |
-| `[resume]` | Herdr's commands | The command that reopens a session, per agent name as Herdr reports it, with `{id}` for the session id. For example `claude = ["claude", "--resume", "{id}"]`. |
+| `[resume]` | Herdr's commands | The command that reopens a session, per agent name as Herdr reports it, with `{id}` for the session id as a whole argument (never inside `sh -c "..."`). For example `claude = ["claude", "--resume", "{id}"]`. Earmark won't reopen a session whose id starts with `-` or holds a quote, a backslash or a control character. |
 
 `python3 earmark.py check` (in the plugin's folder) prints the settings in effect, any problem with the file, and where the archive is; `python3 earmark.py list` prints the archive.
 

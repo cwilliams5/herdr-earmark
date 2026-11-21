@@ -18,9 +18,13 @@ S=earmark-live-check
 H="herdr --session $S"
 SOCK="$HOME/.config/herdr/sessions/$S/herdr.sock"
 STATE="$HOME/.local/state/herdr/plugins/io.github.cwilliams5.earmark"
-# One fixed folder, so Claude Code records a single trusted test folder.
-DIR=/tmp/earmark-live-check
-mkdir -p "$DIR"
+# One fixed folder, so Claude Code records a single trusted test folder. It's
+# in the user's private runtime folder, not a shared /tmp: the agents are
+# told to trust it, so nobody else may be able to put files there first.
+DIR=${XDG_RUNTIME_DIR:-$HOME/.cache}/earmark-live-check
+mkdir -p -m 700 "$DIR"
+[ -O "$DIR" ] && [ ! -L "$DIR" ] || { echo "$DIR isn't a folder of yours; not using it" >&2; exit 1; }
+SLUG=$(echo "$DIR" | sed 's|[/.]|-|g')  # Claude Code's project folder name for it
 PASS=0 FAIL=0
 
 ok()   { echo "  ok: $*"; PASS=$((PASS + 1)); }
@@ -73,20 +77,22 @@ cleanup() {
   say "cleaning up"
   $H server stop >/dev/null 2>&1; sleep 1
   herdr session delete $S >/dev/null 2>&1
-  python3 - "$STATE" "$S" <<'EOF'
-import json, os, sys
-state, s = sys.argv[1], sys.argv[2]
-p = os.path.join(state, "archive.json")
-if os.path.exists(p):
-    d = json.load(open(p))
+  # Through Earmark's own store, under its lock: the user's real hooks share
+  # these files.
+  python3 - "$S" "$ROOT" <<'EOF'
+import sys
+sys.path.insert(0, sys.argv[2])
+from earmark import store
+with store.locked():
+    archive = store.load_archive()
     for part in ("entries", "workspaces"):
-        d[part] = {k: v for k, v in d.get(part, {}).items() if v.get("herdr_session") != s}
-    json.dump(d, open(p, "w"), indent=1)
-p = os.path.join(state, "index.json")
-if os.path.exists(p):
-    d = json.load(open(p)); d.get("sessions", {}).pop(s, None); json.dump(d, open(p, "w"), indent=1)
+        archive[part] = {k: v for k, v in archive[part].items() if v.get("herdr_session") != sys.argv[1]}
+    store.save_archive(archive)
+    index = store.load_index()
+    index["sessions"].pop(sys.argv[1], None)
+    store.save_index(index)
 EOF
-  rm -rf "$HOME/.claude/projects/-tmp-earmark-live-check" "$DIR"
+  rm -rf "$HOME/.claude/projects/$SLUG" "$DIR"
   echo "passed $PASS, failed $FAIL"
 }
 trap cleanup EXIT
