@@ -236,5 +236,49 @@ class NameTests(unittest.TestCase):
         self.assertEqual((e["tab_label"], e["tab_number"], e["title"]), ("go-public", 7, "Agent title"))
 
 
+class WorkspaceTests(unittest.TestCase):
+    def setUp(self):
+        patcher = mock.patch.object(agents, "session_facts", return_value=facts(title="t", last=T0))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def snap_with_tabs(self):
+        agent = pane("w2:p1", ws="w2", tab="w2:t1", session="s1", cwd="/banana")
+        plain = pane("w2:p2", ws="w2", tab="w2:t2", cwd="/banana/notes")
+        other = pane("w1:p1", ws="w1", tab="w1:t1", session="s9")
+        sn = snap([agent, plain, other], workspaces={"w1": "Work", "w2": "Banana"})
+        sn["tabs"]["w2:t1"].update(workspace_id="w2", label="agent work", number=1)
+        sn["tabs"]["w2:t2"].update(workspace_id="w2", label="2", number=2)
+        sn["tabs"]["w1:t1"].update(workspace_id="w1", label="Initial", number=1)
+        return sn
+
+    def test_tab_layouts_keep_plain_tabs_and_order(self):
+        lay = core.tab_layouts(self.snap_with_tabs())["w2"]
+        self.assertEqual(lay["label"], "Banana")
+        self.assertEqual([(t["number"], t["label"], t["cwd"], t["session_id"]) for t in lay["tabs"]],
+                         [(1, "agent work", "/banana", "s1"), (2, "2", "/banana/notes", None)])
+
+    def test_closing_a_workspace_records_it_as_a_unit(self):
+        index, archive = {"sessions": {}}, {"entries": {}}
+        core.apply(index, archive, "default", self.snap_with_tabs(), "pane.focused", {}, T0)
+        only_work = snap([pane("w1:p1", ws="w1", tab="w1:t1", session="s9")], workspaces={"w1": "Work"})
+        core.apply(index, archive, "default", only_work, "workspace.closed", {}, T0 + 5)
+        closed = core.closed_workspaces(archive, "default")
+        self.assertEqual(len(closed), 1)
+        self.assertEqual(closed[0]["label"], "Banana")
+        self.assertEqual(len(closed[0]["tabs"]), 2)
+        # Its agent session is also archived on its own, under Banana.
+        self.assertEqual(archive["entries"]["claude:s1"]["workspace_label"], "Banana")
+        # Closing a tab is not closing a workspace.
+        core.apply(index, archive, "default", snap([], workspaces={"w1": "Work"}), "tab.closed", {}, T0 + 9)
+        self.assertEqual(len(core.closed_workspaces(archive, "default")), 1)
+
+    def test_closed_workspaces_age_out(self):
+        archive = {"entries": {}, "workspaces": {"k": {"herdr_session": "default", "label": "B",
+                                                       "closed_at": T0 - 31 * 86400, "tabs": [{}]}}}
+        core.prune(archive, {"keep_days": 30}, T0)
+        self.assertEqual(archive["workspaces"], {})
+
+
 if __name__ == "__main__":
     unittest.main()

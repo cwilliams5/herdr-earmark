@@ -94,6 +94,15 @@ def apply(index, archive, session, snap, event, data, t):
                     changed = True
     s["workspaces"] = ws_labels
 
+    # A workspace that's gone was closed: remember its tabs as one unit, so
+    # it can be restored with exactly the tabs it had (its other archived
+    # sessions stay in the archive).
+    layouts = tab_layouts(snap)
+    for wid, layout in s.get("layouts", {}).items():
+        if wid not in snap["workspaces"]:
+            changed |= record_closed_workspace(archive, session, wid, layout, t)
+    s["layouts"] = layouts
+
     live = set()
     for pid, p in snap["panes"].items():
         ref = p.get("agent_session") or {}
@@ -137,6 +146,51 @@ def apply(index, archive, session, snap, event, data, t):
         del entries[key]
         changed = True
     return changed
+
+
+def tab_layouts(snap):
+    """Per workspace: its label and its tabs in order, each with its name,
+    folder, and the agent session it runs, if any. Splits are not kept: a
+    restored tab gets one pane (CLAUDE.md, "What Earmark is")."""
+    out = {}
+    panes_by_tab = {}
+    for p in sorted(snap["panes"].values(), key=lambda p: p["pane_id"]):
+        panes_by_tab.setdefault(p.get("tab_id"), []).append(p)
+    for tid, tab in snap["tabs"].items():
+        wid = tab.get("workspace_id")
+        w = snap["workspaces"].get(wid)
+        if not w:
+            continue
+        panes = panes_by_tab.get(tid, [])
+        agent_pane = next((p for p in panes if (p.get("agent_session") or {}).get("value")), None)
+        lead = agent_pane or (panes[0] if panes else {})
+        ref = (agent_pane or {}).get("agent_session") or {}
+        entry = {
+            "number": tab.get("number"),
+            "label": tab.get("label") or "",
+            "cwd": lead.get("foreground_cwd") or lead.get("cwd") or "",
+            "agent": (ref.get("agent") or (agent_pane or {}).get("agent")) if ref else None,
+            "session_id": ref.get("value"),
+        }
+        layout = out.setdefault(wid, {"label": w.get("label") or "", "tabs": []})
+        layout["tabs"].append(entry)
+    for layout in out.values():
+        layout["tabs"].sort(key=lambda tb: tb["number"] if isinstance(tb["number"], int) else 0)
+    return out
+
+
+def record_closed_workspace(archive, session, wid, layout, t):
+    if not layout.get("tabs"):
+        return False
+    key = f"{session}|{wid}|{int(t)}"
+    archive.setdefault("workspaces", {})[key] = {
+        "herdr_session": session,
+        "workspace_id": wid,
+        "label": layout.get("label") or "",
+        "closed_at": t,
+        "tabs": layout["tabs"],
+    }
+    return True
 
 
 def boot_protected(s, pid, t):
@@ -219,6 +273,11 @@ def prune(archive, cfg, t):
         if cfg["keep_days"] and t - (e.get("last_active") or e.get("closed_at") or t) > cfg["keep_days"] * 86400:
             del entries[key]
             changed = True
+    closed = archive.setdefault("workspaces", {})
+    for key in list(closed):
+        if cfg["keep_days"] and t - closed[key].get("closed_at", t) > cfg["keep_days"] * 86400:
+            del closed[key]
+            changed = True
     return changed
 
 
@@ -264,6 +323,72 @@ def reopen(entry, ctx, cfg):
     except herdr.HerdrError as e:
         return str(e)
     forget(entry["key"])
+    return None
+
+
+def closed_workspaces(archive, session):
+    """Closed workspaces of one Herdr session, newest first."""
+    rows = [dict(w, key=k) for k, w in archive.get("workspaces", {}).items() if w["herdr_session"] == session]
+    return sorted(rows, key=lambda w: w.get("closed_at") or 0, reverse=True)
+
+
+def forget_workspace(key):
+    """Forget a closed workspace's grouping; its sessions stay archived."""
+    with store.locked():
+        archive = store.load_archive()
+        if archive.get("workspaces", {}).pop(key, None) is not None:
+            store.save_archive(archive)
+
+
+def restore_workspace(record, cfg):
+    """Bring a closed workspace back: its tabs in order, with their names and
+    folders, each agent tab resuming its session. Into the live workspace of
+    the same name if there is one, else a new one. Returns an error or None."""
+    tabs = record.get("tabs") or []
+    if not tabs:
+        return "Nothing to restore."
+    try:
+        snap = herdr.snapshot()
+    except herdr.HerdrError as e:
+        return str(e)
+    target = next((wid for wid, w in snap["workspaces"].items()
+                   if (w.get("label") or "") == record["label"]), None)
+    first_cwd = next((tb["cwd"] for tb in tabs if tb.get("cwd") and os.path.isdir(tb["cwd"])),
+                     os.path.expanduser("~"))
+    resumed = []
+    try:
+        first_pane = first_tab = None
+        if target:
+            herdr.run("workspace", "focus", target)
+        else:
+            created = herdr.run("workspace", "create", "--cwd", first_cwd, "--label", record["label"], "--focus")
+            target = created["workspace"]["workspace_id"]
+            first_tab = created["tab"]["tab_id"]
+            first_pane = (created.get("root_pane") or created.get("pane"))["pane_id"]
+        for i, tab in enumerate(tabs):
+            label = "" if is_default_tab_label(tab.get("label"), tab.get("number")) else tab["label"]
+            if i == 0 and first_pane:
+                pane_id = first_pane
+                if label:
+                    herdr.run("tab", "rename", first_tab, label)
+            else:
+                pane_id = herdr.new_tab(target, tab.get("cwd"), label, focus=(i == 0))
+            argv = None
+            if tab.get("session_id") and tab.get("agent"):
+                facts = agents.session_facts(tab["agent"], tab["session_id"])
+                if facts["exists"] and facts["has_content"]:
+                    argv = agents.resume_argv(tab["agent"], tab["session_id"], cfg["resume"])
+            if argv:
+                herdr.run_in_pane(pane_id, argv)
+                resumed.append(f"{tab['agent']}:{tab['session_id']}")
+    except herdr.HerdrError as e:
+        return str(e)
+    with store.locked():
+        archive = store.load_archive()
+        archive.get("workspaces", {}).pop(record["key"], None)
+        for key in resumed:  # live again; the next hook would also drop them
+            archive.get("entries", {}).pop(key, None)
+        store.save_archive(archive)
     return None
 
 

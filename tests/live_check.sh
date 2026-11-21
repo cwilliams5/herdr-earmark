@@ -74,10 +74,12 @@ cleanup() {
   python3 - "$STATE" "$S" <<'EOF'
 import json, os, sys
 state, s = sys.argv[1], sys.argv[2]
-for name, drop in (("archive.json", lambda d: {k: v for k, v in d.get("entries", {}).items() if v.get("herdr_session") != s}),):
-    p = os.path.join(state, name)
-    if os.path.exists(p):
-        d = json.load(open(p)); d["entries"] = drop(d); json.dump(d, open(p, "w"), indent=1)
+p = os.path.join(state, "archive.json")
+if os.path.exists(p):
+    d = json.load(open(p))
+    for part in ("entries", "workspaces"):
+        d[part] = {k: v for k, v in d.get(part, {}).items() if v.get("herdr_session") != s}
+    json.dump(d, open(p, "w"), indent=1)
 p = os.path.join(state, "index.json")
 if os.path.exists(p):
     d = json.load(open(p)); d.get("sessions", {}).pop(s, None); json.dump(d, open(p, "w"), indent=1)
@@ -132,3 +134,34 @@ start_server; sleep 6
 AFTER=$(jq --arg s "$S" '[.entries[] | select(.herdr_session == $s)] | length' "$STATE/archive.json")
 [ "$AFTER" = "$BEFORE" ] && ok "archive unchanged across restart ($AFTER)" || bad "archive went from $BEFORE to $AFTER"
 [ -z "$(entry "$SID3" session_id)" ] && ok "restored session not archived" || bad "restored session archived"
+
+say "5. a closed workspace comes back with its tabs, names and session"
+GW=$($H workspace create --cwd "$DIR" --label Gamma --no-focus | jq -r '.result.workspace.workspace_id')
+GT1=$($H tab list --workspace "$GW" | jq -r '.result.tabs[0].tab_id')
+$H tab rename "$GT1" notes >/dev/null
+PG=$(claude_tab "$GW"); SIDG=$(wait_session "$PG") || bad "no session in Gamma"
+prompt "$PG" || bad "Claude didn't answer"
+$H tab rename "$($H pane get "$PG" | jq -r '.result.pane.tab_id')" agent-work >/dev/null
+$H pane get "$PG" >/dev/null; sleep 1
+$H workspace close "$GW" >/dev/null; sleep 2
+REC=$(jq -c --arg s "$S" '[.workspaces[]? | select(.herdr_session == $s and .label == "Gamma")][0]' "$STATE/archive.json")
+[ "$(echo "$REC" | jq '.tabs | length')" = 2 ] && ok "recorded Gamma with 2 tabs" || bad "record: $REC"
+[ "$(entry "$SIDG" workspace_label)" = Gamma ] && ok "its session archived under Gamma" || bad "session not archived"
+HERDR_SOCKET_PATH=$SOCK HERDR_SESSION=$S python3 - "$STATE" "$ROOT" "$S" <<'EOF2' || bad "restore failed"
+import json, os, sys
+sys.path.insert(0, sys.argv[2])
+from earmark import config, core
+archive = json.load(open(os.path.join(sys.argv[1], "archive.json")))
+rec = next(r for r in core.closed_workspaces(archive, sys.argv[3]) if r["label"] == "Gamma")
+err = core.restore_workspace(rec, config.load())
+print(err or "", end="")
+sys.exit(1 if err else 0)
+EOF2
+sleep 3
+NW=$($H workspace list | jq -r '.result.workspaces[] | select(.label == "Gamma") | .workspace_id')
+LABELS=$($H tab list --workspace "$NW" | jq -r '[.result.tabs[] | .label] | join(",")')
+[ "$LABELS" = "notes,agent-work" ] && ok "tabs back in order: $LABELS" || bad "tabs: '$LABELS'"
+PR=$($H pane list | jq -r --arg w "$NW" '.result.panes[] | select(.workspace_id == $w and .agent == "claude") | .pane_id' | head -1)
+[ -n "$PR" ] && [ "$(wait_session "$PR")" = "$SIDG" ] && ok "agent tab resumed its session" || bad "session not resumed"
+[ "$(jq --arg s "$S" '[.workspaces[]? | select(.herdr_session == $s)] | length' "$STATE/archive.json")" = 0 ] \
+  && ok "closed-workspace record removed" || bad "record still there"

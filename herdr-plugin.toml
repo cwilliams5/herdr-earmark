@@ -20,6 +20,14 @@ description = "Show this workspace's archived agent sessions."
 contexts = ["workspace"]
 command = ["python3", "earmark.py", "open"]
 
+# Bound to Shift+the same key: the popup opened on closed workspaces.
+[[actions]]
+id = "open-workspaces"
+title = "Restore a closed workspace"
+description = "Show closed workspaces, to bring one back with all its tabs."
+contexts = ["workspace"]
+command = ["python3", "earmark.py", "open-workspaces"]
+
 [[panes]]
 id = "archive"
 title = "Earmark"

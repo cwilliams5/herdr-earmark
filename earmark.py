@@ -3,8 +3,9 @@
 
 Herdr runs this with a subcommand from herdr-plugin.toml:
 
-    open     the "open" action (bound to a key): show the archive popup
-    popup    the popup itself
+    open             the "open" action: the popup on this workspace's sessions
+    open-workspaces  the "open-workspaces" action: the popup on closed workspaces
+    popup            the popup itself (EARMARK_VIEW picks the view)
     hook     every event hook and the startup hook: keep the notes on live
              panes current and archive what closed
 
@@ -29,13 +30,18 @@ def _json_env(name):
         return None
 
 
-def cmd_open():
-    herdr.run("plugin", "pane", "open", "--plugin", PLUGIN_ID, "--entrypoint", "archive")
+def cmd_open(view="sessions"):
+    herdr.run("plugin", "pane", "open", "--plugin", PLUGIN_ID, "--entrypoint", "archive",
+              "--env", f"EARMARK_VIEW={view}")
+
+
+def cmd_open_workspaces():
+    cmd_open("workspaces")
 
 
 def cmd_popup():
     from earmark import ui
-    ui.main(_json_env("HERDR_PLUGIN_CONTEXT_JSON") or {})
+    ui.main(_json_env("HERDR_PLUGIN_CONTEXT_JSON") or {}, os.environ.get("EARMARK_VIEW") or "sessions")
 
 
 def cmd_hook():
@@ -65,11 +71,13 @@ def cmd_check():
         print(f"  {key} = {cfg[key]!r}")
     for agent, argv in sorted(cfg["resume"].items()):
         print(f"  resume.{agent} = {argv!r}")
+    archive = store.load_archive()
     print(f"data: {store.state_dir()}")
-    print(f"  {len(store.load_archive().get('entries', {}))} archived sessions")
+    print(f"  {len(archive.get('entries', {}))} archived sessions, "
+          f"{len(archive.get('workspaces', {}))} closed workspaces")
 
 
-COMMANDS = {"open": cmd_open, "popup": cmd_popup, "hook": cmd_hook, "list": cmd_list, "check": cmd_check}
+COMMANDS = {"open": cmd_open, "open-workspaces": cmd_open_workspaces, "popup": cmd_popup, "hook": cmd_hook, "list": cmd_list, "check": cmd_check}
 
 
 def main(argv):
