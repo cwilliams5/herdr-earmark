@@ -61,8 +61,8 @@ class Popup:
         rows = core.listing(archive, self.session, None if self.all else self.workspace)
         if self.filter:
             needle = self.filter.lower()
-            rows = [r for r in rows if needle in (r.get("title") or "").lower()
-                    or needle in (r.get("workspace_label") or "").lower()]
+            rows = [r for r in rows if any(needle in (text or "").lower() for text in
+                    (r.get("title"), core.custom_name(r), r.get("workspace_label")))]
         self.rows = rows
         self.sel = min(self.sel, max(0, len(rows) - 1))
 
@@ -106,12 +106,16 @@ class Popup:
             detail = f"{r['agent']}  {ago(r.get('last_active'), now):>13}"
             if self.all:
                 detail = f"{r.get('workspace_label') or '?'}  ·  " + detail
-            title = r.get("title") or r.get("tab_label") or "(untitled session)"
+            primary, secondary = core.names(r, self.cfg["title_first"])
             room = w - len(detail) - FORGET_COL - 4
             if room < 10:  # narrow: drop the detail
                 detail, room = "", w - FORGET_COL - 3
             scr.addnstr(y, 0, " " * (w - 1), w - 1, attr)
-            scr.addnstr(y, 1, ("› " if selected else "  ") + title[:room], room + 2, attr | curses.A_BOLD)
+            scr.addnstr(y, 1, ("› " if selected else "  ") + primary[:room], room + 2, attr | curses.A_BOLD)
+            # The other name, dimmed, in whatever room is left.
+            rest = room - len(primary) - 2
+            if secondary and rest > 3:
+                scr.addnstr(y, 3 + len(primary) + 2, secondary[:rest], rest, attr | curses.A_DIM)
             if detail:
                 scr.addnstr(y, w - FORGET_COL - len(detail) - 1, detail, len(detail), attr | curses.A_DIM)
             scr.addnstr(y, w - FORGET_COL, " ×", 2, attr)

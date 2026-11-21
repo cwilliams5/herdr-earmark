@@ -9,6 +9,10 @@ io.github.cwilliams5.earmark`). Every key is optional:
     report_count = true    publish "N archived" as the $earmark sidebar
                            token; it only shows if you add $earmark to
                            ui.sidebar.spaces.rows in Herdr's config.
+    title_first = "tab"    which name leads in the archive list: "tab" (the
+                           name you gave the tab or pane, when you gave one)
+                           or "agent" (the agent's own title for the session).
+                           The other is shown dimmed beside it.
     debug_log = false      append every hook's event to events.jsonl in the
                            state dir.
 
@@ -18,7 +22,7 @@ io.github.cwilliams5.earmark`). Every key is optional:
 import os
 import tomllib
 
-DEFAULTS = {"keep_days": 30, "report_count": True, "debug_log": False, "resume": {}}
+DEFAULTS = {"keep_days": 30, "report_count": True, "title_first": "tab", "debug_log": False, "resume": {}}
 
 
 def config_path():
@@ -41,6 +45,8 @@ def load():
     for key in ("report_count", "debug_log"):
         if isinstance(data.get(key), bool):
             cfg[key] = data[key]
+    if data.get("title_first") in ("tab", "agent"):
+        cfg["title_first"] = data["title_first"]
     resume = data.get("resume")
     if isinstance(resume, dict):
         cfg["resume"] = {k: v for k, v in resume.items()

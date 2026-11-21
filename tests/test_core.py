@@ -207,5 +207,34 @@ class AgentTests(unittest.TestCase):
             self.assertFalse(agents.session_facts("codex", "x")["known"])
 
 
+class NameTests(unittest.TestCase):
+    def test_default_tab_labels(self):
+        for label, number in (("Initial", 1), ("3", 3), ("", None), ("12", None)):
+            self.assertTrue(core.is_default_tab_label(label, number), label)
+        for label in ("go-public", "Sash", "clip manage"):
+            self.assertFalse(core.is_default_tab_label(label, 4), label)
+
+    def test_names_order_and_fallbacks(self):
+        e = {"tab_label": "go-public", "tab_number": 15, "pane_label": "", "title": "Omarchy bar widget"}
+        self.assertEqual(core.names(e), ("go-public", "Omarchy bar widget"))
+        self.assertEqual(core.names(e, "agent"), ("Omarchy bar widget", "go-public"))
+        self.assertEqual(core.names(dict(e, tab_label="Initial")), ("Omarchy bar widget", ""))
+        self.assertEqual(core.names(dict(e, tab_label="Initial"), "agent"), ("Omarchy bar widget", ""))
+        self.assertEqual(core.names(dict(e, pane_label="left"))[0], "left")
+        self.assertEqual(core.names(dict(e, title="GO-PUBLIC")), ("go-public", ""))
+        self.assertEqual(core.names({"tab_label": "2", "title": ""}), ("(untitled session)", ""))
+
+    def test_archived_entry_keeps_tab_name_and_position(self):
+        index, archive = {"sessions": {}}, {"entries": {}}
+        p = pane("w1:p1", session="s1")
+        s = snap([p])
+        s["tabs"][p["tab_id"]].update(label="go-public", number=7)
+        with mock.patch.object(agents, "session_facts", return_value=facts(title="Agent title")):
+            core.apply(index, archive, "default", s, "pane.focused", {}, T0)
+            core.apply(index, archive, "default", snap([]), "tab.closed", {}, T0 + 1)
+        e = archive["entries"]["claude:s1"]
+        self.assertEqual((e["tab_label"], e["tab_number"], e["title"]), ("go-public", 7, "Agent title"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -50,7 +50,9 @@ def cmd_list():
     if not entries:
         print("The archive is empty.")
     for e in entries:
-        print(f"{e['herdr_session']} / {e['workspace_label'] or '?'}: {e.get('title') or '(untitled)'}"
+        primary, secondary = core.names(e)
+        print(f"{e['herdr_session']} / {e['workspace_label'] or '?'}: {primary}"
+              f"{'  (' + secondary + ')' if secondary else ''}"
               f"  [{e['agent']} {e['session_id']}]")
 
 
@@ -59,7 +61,7 @@ def cmd_check():
     print(f"Earmark {VERSION}")
     print(f"settings: {config.config_path()}"
           f"{'' if os.path.exists(config.config_path()) else ' (not created; defaults in use)'}")
-    for key in ("keep_days", "report_count", "debug_log"):
+    for key in ("keep_days", "report_count", "title_first", "debug_log"):
         print(f"  {key} = {cfg[key]!r}")
     for agent, argv in sorted(cfg["resume"].items()):
         print(f"  resume.{agent} = {argv!r}")

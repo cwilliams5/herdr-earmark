@@ -83,7 +83,6 @@ def apply(index, archive, session, snap, event, data, t):
         s["reported"] = {}  # sidebar tokens don't survive a restart: send them all again
 
     ws_labels = {wid: w.get("label") or "" for wid, w in snap["workspaces"].items()}
-    tab_labels = {tid: tb.get("label") or "" for tid, tb in snap["tabs"].items()}
 
     # Renamed workspaces take their archive with them.
     for wid, old in s.get("workspaces", {}).items():
@@ -111,7 +110,9 @@ def apply(index, archive, session, snap, event, data, t):
                 "tab_id": p.get("tab_id"),
                 "workspace_id": p.get("workspace_id"),
                 "workspace_label": ws_labels.get(p.get("workspace_id"), (note or {}).get("workspace_label", "")),
-                "tab_label": tab_labels.get(p.get("tab_id"), ""),
+                "tab_label": (snap["tabs"].get(p.get("tab_id")) or {}).get("label") or "",
+                "tab_number": (snap["tabs"].get(p.get("tab_id")) or {}).get("number"),
+                "pane_label": p.get("label") or "",
                 "agent": agent,
                 "session_id": ref["value"],
                 "source": ref.get("source"),
@@ -153,16 +154,47 @@ def archive_note(entries, session, note, t, reason):
         "workspace_id": note.get("workspace_id"),
         "workspace_label": note.get("workspace_label") or "",
         "tab_label": note.get("tab_label") or "",
+        "tab_number": note.get("tab_number"),
+        "pane_label": note.get("pane_label") or "",
         "agent": note["agent"],
         "session_id": note["session_id"],
         "source": note.get("source"),
         "cwd": note.get("cwd"),
-        "title": facts["title"] or note.get("title") or note.get("tab_label") or "",
+        "title": facts["title"] or note.get("title") or "",
         "closed_at": t,
         "last_active": facts["last_active"] or note.get("seen") or t,
         "reason": reason,
     }
     return True
+
+
+# ------------------------------------------------------------------ names
+
+def is_default_tab_label(label, number=None):
+    """Herdr names a new tab "Initial" (a workspace's first) or its number;
+    anything else is a name the user gave it."""
+    label = (label or "").strip()
+    return not label or label == "Initial" or label.isdigit() or (number is not None and label == str(number))
+
+
+def custom_name(entry):
+    """The name the user gave the session's pane or tab, or ""."""
+    if entry.get("pane_label"):
+        return entry["pane_label"]
+    label = entry.get("tab_label") or ""
+    return "" if is_default_tab_label(label, entry.get("tab_number")) else label
+
+
+def names(entry, first="tab"):
+    """(primary, secondary) names to show: the user's tab name and the agent's
+    title, in the order config.title_first asks for; secondary is "" when
+    there's only one, or they're the same."""
+    mine, agents_title = custom_name(entry), entry.get("title") or ""
+    pair = (mine, agents_title) if first != "agent" else (agents_title, mine)
+    primary, secondary = pair[0] or pair[1], (pair[1] if pair[0] else "")
+    if secondary.strip().lower() == primary.strip().lower():
+        secondary = ""
+    return primary or "(untitled session)", secondary
 
 
 # ---------------------------------------------------------------- archive
@@ -225,7 +257,9 @@ def reopen(entry, ctx, cfg):
                        if (w.get("label") or "") == entry["workspace_label"]), None)
     target = target or ctx.get("workspace_id")
     try:
-        pane_id = herdr.new_tab(target, entry.get("cwd"), (entry.get("title") or "")[:40])
+        # The tab's own name comes back; a tab that only had Herdr's default
+        # label gets a default label again, not the agent's title.
+        pane_id = herdr.new_tab(target, entry.get("cwd"), custom_name(entry))
         herdr.run_in_pane(pane_id, argv)
     except herdr.HerdrError as e:
         return str(e)

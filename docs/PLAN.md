@@ -189,3 +189,14 @@ Log, and CLAUDE.md's platform facts are corrected from it.
   sessions. Facts are in CLAUDE.md. The one test transcript (an `/exit`)
   was moved out of `~/.claude/projects`. Waiting on Cody: A1 (press the
   key, click in the popup) and A4 (right-click a workspace and a tab).
+- 2026-11-21: Cody tested the popup (works). The sidebar count had never
+  reached Herdr (CLI wants the workspace id first; fixed). Tried in Cody's
+  Herdr config as a trial, not yet in dotfiles. Names: entries now keep the
+  tab name, pane name and tab position; the list shows the user's name in
+  bold with the agent's title dimmed beside it (`title_first = "tab"` or
+  "agent"); filter matches both; reopen restores the tab's own name, or
+  leaves Herdr's default label. Next: Cody's look at both. Then phase G
+  (restoring a closed workspace) to discuss: with 5 live and 70 archived
+  sessions, restoring the workspace should bring back the 5 as tabs and
+  leave the 70 in its archive, so a workspace close must be remembered as a
+  unit, separate from sessions closed one by one.
