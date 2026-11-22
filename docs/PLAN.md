@@ -296,3 +296,7 @@ Log, and CLAUDE.md's platform facts are corrected from it.
   CLAUDE_CONFIG_DIR differs between the shell and Herdr's server.
   20 new tests, each failing on the old code; 54 unit tests pass on 3.14
   and 3.9; live check 20/20 with Codex and Grok.
+- 2026-11-21 (handoff): 1.0.0 public and in Herdr's marketplace index.
+  Development continues in a fresh session: start with CLAUDE.md (status,
+  "Cody's own setup", "Pitfalls learned the hard way", "Releasing"), then
+  the "Later" list above. Media method and scripts: media/shoot/.

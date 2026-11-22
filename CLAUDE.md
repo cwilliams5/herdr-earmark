@@ -81,6 +81,20 @@ Decided so far (details in `docs/PLAN.md`):
 - **Origin:** a new project, no spike. The review of existing Herdr plugins
   that led to building it is summarized under Credits.
 
+## Cody's own setup (what a session needs to know)
+
+- Keys: Ctrl+Space then `a` opens the archive, Ctrl+Space then Shift+A
+  the closed workspaces (Herdr's prefix is Ctrl+Space on Omarchy). Both are
+  `[[keys.command]]` blocks in his `~/.config/herdr/config.toml`, tracked
+  in his dotfiles.
+- The `$earmark` sidebar count is off: he tried it and prefers it off.
+  `title_first` is the default (`"tab"`): he names his tabs.
+- His real archive and notes are in
+  `~/.local/state/herdr/plugins/io.github.cwilliams5.earmark/`: never clean
+  it up wholesale; remove only test entries by their `herdr_session`.
+- He runs the linked clone, not the installed release, while Earmark is
+  young (see docs/PLAN.md, "Later").
+
 ## Identity
 
 - Name: Earmark. Repo: `cwilliams5/herdr-earmark`.
@@ -115,8 +129,9 @@ tests/
   live_check.sh     end-to-end against a throwaway named Herdr session
 branding/           logo system (build.py), the pick in eartag/, alternatives/
 media/              README images: hero.png, workspaces.png, reopen.gif,
-                    restore.gif (shot 2026-11-21 in a staged named Herdr
-                    session "earmark-demo" with its own config, see PLAN log)
+                    restore.gif, social-preview.png; shoot/ has the
+                    scripts and the method (staged demo session)
+tests/test_review_fixes.py  one test per pre-release review finding
 docs/PLAN.md        the development plan and log
 ```
 
@@ -279,9 +294,47 @@ Herdr 0.9.5 (Omarchy 4.5.0, Claude Code 2.1.330):
   checks pass as of 2026-11-21).
 - `tests/live_check.sh`: about two minutes against a throwaway named session
   (`earmark-live-check`) with real Claude Code sessions (one-word prompts
-  in `/tmp/earmark-live-check`, which Claude Code is told to trust); it
-  removes the session, its transcripts and its archive entries afterwards.
-  Never test closes in Cody's own session: his real tabs get archived.
+  in `$XDG_RUNTIME_DIR/earmark-live-check`, a private folder Claude Code is
+  told to trust); it removes the session, its transcripts and its archive
+  entries afterwards. Never test closes in Cody's own session: his real
+  tabs get archived, and his real archive is in the same state dir.
+
+### Pitfalls learned the hard way
+
+- **Hooks run the clone's code live.** The plugin is linked, so a
+  half-applied edit runs in Cody's real Herdr on the next event. Make
+  multi-file changes with an all-or-nothing edit script, then run the
+  unit tests at once.
+- **Running inside Herdr leaks its env.** This shell (an agent in a Herdr
+  pane) has `HERDR_SOCKET_PATH`, `HERDR_PANE_ID` etc., so any `herdr`
+  command, or Earmark code, talks to Cody's real server. For anything
+  meant to be isolated, use `env -i HOME=... PATH=/usr/bin:/bin`, or target
+  a named session (`herdr --session X ...`, or `HERDR_SOCKET_PATH` +
+  `HERDR_SESSION` for Earmark's Python).
+- **Herdr's socket path must be short** (Unix `sun_path`, ~108 bytes): a
+  throwaway `HOME` under the long scratchpad path fails with "local socket
+  name length exceeds capacity"; use `mktemp -d /tmp/et.XXXX`.
+- **Test servers:** `herdr --session X server` (headless, via `setsid
+  nohup`), `herdr --session X server stop`, `herdr session delete X`.
+  `HERDR_CONFIG_PATH` points a server and client at another config.
+- **Herdr CLI shape:** ids come before options (`workspace report-metadata
+  <id> --source ...`); `--opt=value` isn't accepted; `pane process-info
+  --pane <id>`; `tab create` returns `.tab.tab_id` and
+  `.root_pane.pane_id`; `workspace create` also returns `.workspace`.
+  Popups have no pane id: close one with a raw socket request
+  `{"method":"popup.close"}`.
+- **Agents' first run in a folder:** Claude Code asks to trust it with "No,
+  exit" preselected (send Down, Enter); Grok asks (send `y`); Codex
+  doesn't. A Claude session without a message writes no transcript.
+- **Codex:** always `codex --no-daemon` in tests. A Codex started without
+  it inside a test session spawns a shared daemon that keeps that session's
+  socket after the test, and Codex sessions then report nowhere until it
+  exits. Auto mode won't let an agent kill processes: ask Cody
+  (`pkill -f app-server-daemon`). Cody's shell wraps `codex` in a function
+  that adds `--no-daemon` once (his dotfiles).
+- **Screenshots and screen takeovers** need Cody's OK first, and no
+  scripted keys or mouse into his desktop: drive Herdr through its CLI and
+  socket instead (see `media/shoot/README.md`).
 - `python3 earmark.py list` / `check` show the archive and the settings in
   effect; `debug_log = true` in config.toml logs every hook's event to
   `events.jsonl` in the state dir; hook errors are in `herdr plugin log list
@@ -321,9 +374,28 @@ plugin and needs nothing from Omarchy, so it works wherever Herdr does
 
 ## Releasing
 
-1. CLAUDE.md current (status, rules, platform facts, Credits).
-2. The `go-public` skill: README and media, independent reviews, the privacy
-   scan last, then publish and distribute.
+`main` must stay release-quality: `herdr plugin update` installs whatever
+is on `main`, not the latest tag. For a release (go-public skill, "Later:
+updates"):
+
+1. Version in two places: `herdr-plugin.toml` (`version`) and
+   `earmark/__init__.py` (`VERSION`). Update the README's "Tested with".
+2. Unit tests (also on Python 3.9: `mise exec python@3.9 -- python -m
+   unittest discover tests`, then `mise uninstall python@3.9.<x>`), and
+   `EARMARK_AGENTS="codex grok" tests/live_check.sh`.
+3. Re-check README claims against the code; re-shoot media if the popup
+   changed (`media/shoot/README.md`).
+4. A fresh correctness review of the changes for anything substantial.
+5. `~/.claude/skills/go-public/scripts/privacy-scan.sh ~/Work/herdr-earmark`
+   as the last step before pushing.
+6. Release notes shown to Cody first, then `gh release create vX.Y.Z
+   --title "Earmark X.Y.Z" --notes-file notes.md`.
+7. The marketplace needs nothing: Herdr indexes repos with the
+   `herdr-plugin` topic every 30 minutes
+   (https://assets.herdr.dev/plugins/index.json). The social preview is
+   `media/social-preview.png`, uploaded by hand in the repo's settings.
+8. Afterwards: status here, `docs/PLAN.md`'s log, Cody's dotfiles
+   (`docs/customizations.md` mentions the version).
 
 ## Voice and conventions
 
