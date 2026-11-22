@@ -11,7 +11,7 @@ Cody's work setup.
 ## Status (2026-11-21)
 
 1.0.0, released and public (cwilliams5/herdr-earmark), MIT. Listed in
-Herdr's marketplace through the `herdr-plugin` topic. Live on Cody's Herdr
+Herdr's marketplace through the `herdr-plugin` topic. Live on the maintainer's Herdr
 from this clone (linked). Tests: 54 unit tests (Python 3.14 and 3.9) and
 `tests/live_check.sh` 20/20 with Codex and Grok. Later, not in 1.0: a
 right-click menu entry (if Herdr ever allows it), facts for Pi, Copilot and
@@ -81,27 +81,13 @@ Decided so far (details in `docs/PLAN.md`):
 - **Origin:** a new project, no spike. The review of existing Herdr plugins
   that led to building it is summarized under Credits.
 
-## Cody's own setup (what a session needs to know)
-
-- Keys: Ctrl+Space then `a` opens the archive, Ctrl+Space then Shift+A
-  the closed workspaces (Herdr's prefix is Ctrl+Space on Omarchy). Both are
-  `[[keys.command]]` blocks in his `~/.config/herdr/config.toml`, tracked
-  in his dotfiles.
-- The `$earmark` sidebar count is off: he tried it and prefers it off.
-  `title_first` is the default (`"tab"`): he names his tabs.
-- His real archive and notes are in
-  `~/.local/state/herdr/plugins/io.github.cwilliams5.earmark/`: never clean
-  it up wholesale; remove only test entries by their `herdr_session`.
-- He runs the linked clone, not the installed release, while Earmark is
-  young (see docs/PLAN.md, "Later").
-
 ## Identity
 
 - Name: Earmark. Repo: `cwilliams5/herdr-earmark`.
 - Ids:
   - Herdr plugin id `io.github.cwilliams5.earmark`
   - actions `open` (key binding target `io.github.cwilliams5.earmark.open`,
-    Cody's Ctrl+Space a) and `open-workspaces` (Ctrl+Space Shift+A)
+    for example `prefix+a`) and `open-workspaces` (for example `prefix+shift+a`)
   - settings: `config.toml` in the plugin's config dir
     (`HERDR_PLUGIN_CONFIG_DIR`, see `herdr plugin config-dir <id>`)
   - archive: `archive.json` in the plugin's state dir
@@ -279,7 +265,7 @@ Herdr 0.9.5 (Omarchy 4.5.0, Claude Code 2.1.330):
   <id>`. A session that never got a message writes no transcript at all,
   and one that only ran `/exit` writes only local-command records: neither
   has anything to resume, so Earmark skips them.
-- **Herdr workspaces** may share a folder (all of Cody's start in `~/Work`),
+- **Herdr workspaces** may share a folder (a common setup),
   so a session's folder can't identify its workspace; the workspace must be
   recorded at close time.
 
@@ -297,17 +283,18 @@ Herdr 0.9.5 (Omarchy 4.5.0, Claude Code 2.1.330):
   in `$XDG_RUNTIME_DIR/earmark-live-check`, a private folder Claude Code is
   told to trust); it removes the session, its transcripts and its archive
   entries afterwards. Never test closes in Cody's own session: his real
-  tabs get archived, and his real archive is in the same state dir.
+  tabs get archived, and the maintainer's real archive is in the same
+  state dir: remove only test entries, by their `herdr_session`.
 
 ### Pitfalls learned the hard way
 
-- **Hooks run the clone's code live.** The plugin is linked, so a
-  half-applied edit runs in Cody's real Herdr on the next event. Make
+- **Hooks run the clone's code live.** When the clone is linked, a
+  half-applied edit runs in the maintainer's real Herdr on the next event. Make
   multi-file changes with an all-or-nothing edit script, then run the
   unit tests at once.
 - **Running inside Herdr leaks its env.** This shell (an agent in a Herdr
   pane) has `HERDR_SOCKET_PATH`, `HERDR_PANE_ID` etc., so any `herdr`
-  command, or Earmark code, talks to Cody's real server. For anything
+  command, or Earmark code, talks to the maintainer's real server. For anything
   meant to be isolated, use `env -i HOME=... PATH=/usr/bin:/bin`, or target
   a named session (`herdr --session X ...`, or `HERDR_SOCKET_PATH` +
   `HERDR_SESSION` for Earmark's Python).
@@ -329,10 +316,10 @@ Herdr 0.9.5 (Omarchy 4.5.0, Claude Code 2.1.330):
 - **Codex:** always `codex --no-daemon` in tests. A Codex started without
   it inside a test session spawns a shared daemon that keeps that session's
   socket after the test, and Codex sessions then report nowhere until it
-  exits. Auto mode won't let an agent kill processes: ask Cody
-  (`pkill -f app-server-daemon`). Cody's shell wraps `codex` in a function
-  that adds `--no-daemon` once (his dotfiles).
-- **Screenshots and screen takeovers** need Cody's OK first, and no
+  exits; ask the maintainer to stop it (`pkill -f app-server-daemon`).
+  A user's own `codex` alias may already add `--no-daemon`, which is why
+  Earmark's resume command starts with `command codex`.
+- **Screenshots and screen takeovers** need the maintainer's OK first, and no
   scripted keys or mouse into his desktop: drive Herdr through its CLI and
   socket instead (see `media/shoot/README.md`).
 - `python3 earmark.py list` / `check` show the archive and the settings in
@@ -394,8 +381,8 @@ updates"):
    `herdr-plugin` topic every 30 minutes
    (https://assets.herdr.dev/plugins/index.json). The social preview is
    `media/social-preview.png`, uploaded by hand in the repo's settings.
-8. Afterwards: status here, `docs/PLAN.md`'s log, Cody's dotfiles
-   (`docs/customizations.md` mentions the version).
+8. Afterwards: status here, `docs/PLAN.md`'s log, the maintainer's dotfiles
+   (which mention the version).
 
 ## Voice and conventions
 
