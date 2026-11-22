@@ -192,8 +192,29 @@ Log, and CLAUDE.md's platform facts are corrected from it.
 
 ### Release prep (go-public)
 
-- [ ] CLAUDE.md current: status, rules, platform facts, Credits
-- [ ] Then run the `go-public` skill
+- [x] CLAUDE.md current: status, rules, platform facts, Credits
+- [x] Then run the `go-public` skill: 1.0.0 public and released
+      2026-11-21; listed in Herdr's marketplace index
+      (assets.herdr.dev/plugins/index.json) the same day.
+
+### Later (not scheduled)
+
+- [ ] Switch Cody's Herdr from the linked clone to the installed release
+      once changes slow (`herdr plugin unlink`, `herdr plugin install`,
+      and tools.yaml in the dotfiles). Until then main must stay
+      release-quality: `herdr plugin update` follows main, not tags.
+- [ ] When herdrdev/herdr#4649 is fixed: drop `--no-daemon` (and
+      `command`) from the Codex resume command, the README's Codex note,
+      and Cody's `codex` shell function in his dotfiles.
+- [ ] After Herdr updates: re-run tests/live_check.sh, retest whether
+      plugin actions can appear in Herdr's right-click menus (A4), and
+      re-check the platform facts in CLAUDE.md.
+- [ ] Facts (title, last activity, still there) for Pi, Copilot and other
+      agents, once there are real sessions of theirs to read.
+- [ ] CLAUDE_CONFIG_DIR set in the shell but not seen by Herdr's server:
+      today every Claude session looks deleted (documented in the README's
+      known limits). Treat "not found" as unknown unless the session's
+      file was seen before.
 
 ## Testing
 
