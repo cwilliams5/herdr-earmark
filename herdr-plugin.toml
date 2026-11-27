@@ -3,7 +3,7 @@
 
 id = "io.github.cwilliams5.earmark"
 name = "Earmark"
-version = "1.0.0"
+version = "1.1.0"
 min_herdr_version = "0.9.5"
 description = "Closed agent sessions, filed under their Herdr workspace and ready to reopen."
 platforms = ["linux", "macos"]
@@ -28,6 +28,15 @@ description = "Show closed workspaces, to bring one back with all its tabs."
 contexts = ["workspace"]
 command = ["python3", "earmark.py", "open-workspaces"]
 
+# Suspend the agent in view to free its memory, or resume it (Ctrl+S, say):
+#   key = "prefix+ctrl+s", command = "io.github.cwilliams5.earmark.suspend"
+[[actions]]
+id = "suspend"
+title = "Suspend or resume this tab"
+description = "End the agent in view to free its memory, keeping the tab; or bring a suspended one back."
+contexts = ["workspace"]
+command = ["python3", "earmark.py", "suspend"]
+
 [[panes]]
 id = "archive"
 title = "Earmark"
@@ -35,6 +44,16 @@ placement = "popup"
 width = "90%"
 height = "70%"
 command = ["python3", "earmark.py", "popup"]
+
+# The suspend key's answers and its "suspend anyway?" question: Herdr's own
+# notifications are off unless [ui.toast] delivery is set, so they'd go unseen.
+[[panes]]
+id = "message"
+title = "Earmark"
+placement = "popup"
+width = "60%"
+height = "50%"
+command = ["python3", "earmark.py", "message"]
 
 # Herdr's close events carry only ids, so every hook refreshes Earmark's
 # notes on the live panes, and closes are found by comparing (earmark/core.py).

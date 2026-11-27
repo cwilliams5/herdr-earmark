@@ -10,6 +10,8 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.dirname(__file__))
+import _isolate  # noqa: E402,F401  (first: no real Herdr, settings or agent data)
 
 from earmark import agents, config, core, herdr, store  # noqa: E402
 from test_core import T0, facts, pane, snap  # noqa: E402

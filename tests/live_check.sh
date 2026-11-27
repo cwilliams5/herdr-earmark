@@ -5,7 +5,9 @@
 #
 # It checks: a closed tab is archived under its workspace; reopening runs
 # `claude --resume` in a new tab and the entry leaves the archive; /exit
-# archives again; a server restart archives nothing. Then it removes the
+# archives again; a server restart archives nothing; a closed workspace comes
+# back; a suspended tab shows its placeholder, survives a restart, resumes
+# its session on Enter, and is archived when closed. Then it removes the
 # session, the test transcripts and the test's archive entries.
 #
 # Run from the repo: tests/live_check.sh   (about two minutes)
@@ -80,7 +82,7 @@ cleanup() {
   # Through Earmark's own store, under its lock: the user's real hooks share
   # these files.
   python3 - "$S" "$ROOT" <<'EOF'
-import sys
+import os, sys
 sys.path.insert(0, sys.argv[2])
 from earmark import store
 with store.locked():
@@ -89,6 +91,11 @@ with store.locked():
         archive[part] = {k: v for k, v in archive[part].items() if v.get("herdr_session") != sys.argv[1]}
     store.save_archive(archive)
     index = store.load_index()
+    for rec in (index["sessions"].get(sys.argv[1]) or {}).get("suspended", {}).values():
+        try:
+            os.unlink(rec.get("screen") or "")
+        except OSError:
+            pass
     index["sessions"].pop(sys.argv[1], None)
     store.save_index(index)
 EOF
@@ -174,8 +181,29 @@ PR=$($H pane list | jq -r --arg w "$NW" '.result.panes[] | select(.workspace_id 
 [ "$(jq --arg s "$S" '[.workspaces[]? | select(.herdr_session == $s)] | length' "$STATE/archive.json")" = 0 ] \
   && ok "closed-workspace record removed" || bad "record still there"
 
+say "6. suspend in place: the key, a restart, Enter to resume, closing"
+fgp() { $H pane process-info --pane "$1" 2>/dev/null | jq -r '[.result.process_info.foreground_processes[].name] | join(" ")'; }
+suspend_key() {  # the worker the suspend key starts, with manual mode on just for it
+  HERDR_SOCKET_PATH=$SOCK HERDR_SESSION=$S HERDR_PLUGIN_CONFIG_DIR=$DIR/conf python3 "$ROOT/earmark.py" worker --pane "$1"
+}
+mkdir -p "$DIR/conf"; printf '[suspend]\nwhen = "manual"\n' > "$DIR/conf/config.toml"
+P6=$(claude_tab "$WS"); S6=$(wait_session "$P6") || bad "no session to suspend"
+prompt "$P6" || bad "Claude didn't answer"
+suspend_key "$P6"; sleep 2
+[ "$(fgp "$P6")" = python3 ] && ok "suspended: the placeholder holds the tab" || bad "after suspending: $(fgp "$P6")"
+$H pane read "$P6" --source visible | grep -q "Press Enter to resume" && ok "it says Enter to resume" || bad "no Enter to resume"
+[ -z "$(entry "$S6" session_id)" ] && ok "not archived while suspended" || bad "archived while suspended"
+$H server stop >/dev/null; sleep 2; start_server
+for _ in $(seq 1 30); do [ "$(fgp "$P6")" = python3 ] && break; sleep 1; done
+[ "$(fgp "$P6")" = python3 ] && ok "placeholder back after a restart" || bad "after a restart: $(fgp "$P6")"
+$H pane send-keys "$P6" enter >/dev/null; sleep 2
+[ "$(wait_session "$P6")" = "$S6" ] && ok "Enter resumed the same session in place" || bad "not resumed"
+sleep 3; suspend_key "$P6"; sleep 2
+$H tab close "$($H pane get "$P6" | jq -r '.result.pane.tab_id')" >/dev/null; sleep 2
+[ "$(entry "$S6" reason)" = closed ] && ok "a closed suspended tab is archived" || bad "after closing: '$(entry "$S6" reason)'"
+
 for AG in ${EARMARK_AGENTS:-}; do
-  say "6. $AG: close, reopen through Earmark, close again"
+  say "7. $AG: close, reopen through Earmark, close again"
   r=$($H tab create --workspace "$WS" --cwd "$DIR" --label "$AG-tab" --no-focus)
   PA=$(echo "$r" | jq -r '.result.root_pane.pane_id')
   # Codex 0.157+ runs sessions in a shared daemon that reports them to the

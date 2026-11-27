@@ -9,6 +9,8 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.dirname(__file__))
+import _isolate  # noqa: E402,F401  (first: no real Herdr, settings or agent data)
 
 from earmark import agents, core  # noqa: E402
 
@@ -146,7 +148,7 @@ class PruneAndListTests(unittest.TestCase):
                                "claude:ok": self.entry("ok"),
                                "codex:x": self.entry("x", agent="codex", last=T0 - 10 * 86400)}}
 
-        def fake(agent, sid):
+        def fake(agent, sid, **kw):
             if agent != "claude":
                 return {"known": False, "exists": True, "has_content": True, "title": "", "last_active": None}
             return facts(exists=sid != "gone", last=T0 - 40 * 86400 if sid == "old" else T0)
@@ -172,7 +174,7 @@ class PruneAndListTests(unittest.TestCase):
 
 class AgentTests(unittest.TestCase):
     def test_resume_commands(self):
-        self.assertEqual(agents.resume_argv("claude", "abc"), ["claude", "--resume", "abc"])
+        self.assertEqual(agents.resume_argv("claude", "abc"), ["command", "claude", "--resume", "abc"])
         self.assertEqual(agents.resume_argv("copilot", "x"), ["copilot", "--resume=x"])
         self.assertEqual(agents.resume_argv("codex", "c1"), ["command", "codex", "--no-daemon", "resume", "c1"])
         self.assertEqual(agents.resume_argv("letta", "default:ag1"),
@@ -370,7 +372,7 @@ class KeepDaysTests(unittest.TestCase):
                                "pi:x": self.entry("pi", T0 - 31 * 86400),
                                "pi:y": dict(self.entry("pi", T0 - 5 * 86400), session_id="y")}}
 
-        def fake(agent, sid):
+        def fake(agent, sid, **kw):
             if agent == "claude":
                 return facts(last=T0 - 200 * 86400)  # still there: Claude keeps it
             return {"known": False, "exists": True, "has_content": True, "title": "", "last_active": None}

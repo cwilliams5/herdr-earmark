@@ -28,8 +28,9 @@ WORKSPACE_KEYS = ("herdr_session", "label", "tabs")
 
 
 def state_dir():
-    path = os.environ.get("HERDR_PLUGIN_STATE_DIR") or os.path.expanduser(
-        "~/.local/state/herdr/plugins/io.github.cwilliams5.earmark")
+    path = os.environ.get("HERDR_PLUGIN_STATE_DIR") or os.path.join(  # by hand: where Herdr keeps it
+        os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
+        "herdr", "plugins", "io.github.cwilliams5.earmark")
     os.makedirs(path, mode=0o700, exist_ok=True)
     return path
 
@@ -43,6 +44,39 @@ def locked():
             yield
         finally:
             fcntl.flock(f, fcntl.LOCK_UN)
+
+
+@contextlib.contextmanager
+def try_lock(name):
+    """A lock only one process holds at a time; yields False (at once) if
+    another process has it."""
+    fd = os.open(os.path.join(state_dir(), f".{name}.lock"), os.O_RDWR | os.O_CREAT, 0o600)
+    with os.fdopen(fd, "r+") as f:
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
+def screens_dir():
+    """Where suspended tabs' last screens are kept (only the user can read
+    them: they're copies of what the terminal showed)."""
+    path = os.path.join(state_dir(), "screens")
+    os.makedirs(path, mode=0o700, exist_ok=True)
+    return path
+
+
+def load_json(name):
+    return _load(name, {})
+
+
+def save_json(name, data):
+    _save(name, data)
 
 
 def _load(name, empty):
@@ -60,7 +94,10 @@ def _load(name, empty):
         n = 1
         while os.path.exists(aside if n == 1 else f"{aside}-{n}"):
             n += 1
-        os.replace(path, aside if n == 1 else f"{aside}-{n}")
+        try:
+            os.replace(path, aside if n == 1 else f"{aside}-{n}")
+        except FileNotFoundError:
+            pass  # another reader set it aside first
         return empty
 
 
@@ -78,6 +115,12 @@ def _save(name, data):
         with contextlib.suppress(OSError):
             os.unlink(tmp)
         raise
+
+
+def session_state(index, session):
+    """One Herdr session's part of index.json, created empty if new."""
+    return index.setdefault("sessions", {}).setdefault(
+        session, {"panes": {}, "workspaces": {}, "boot": 0, "boot_panes": [], "reported": {}})
 
 
 def load_index():

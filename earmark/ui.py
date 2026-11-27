@@ -18,9 +18,8 @@ for the selection and the current view, bold names, dim details.
 import curses
 import re
 import time
-import unicodedata
 
-from . import config, core, herdr, store
+from . import config, core, herdr, store, text
 
 BUTTON5_PRESSED = getattr(curses, "BUTTON5_PRESSED", 0x200000)  # wheel down
 FORGET_COL = 3  # the × and its margin at the right edge of each row
@@ -31,41 +30,7 @@ HELP = {
 }
 
 
-_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
-
-
-def clean(text):
-    """Text safe to draw: control characters (tabs, newlines, backspaces,
-    escapes that came in through a title or a name) become spaces."""
-    return _CONTROL.sub(" ", str(text or ""))
-
-
-def char_cols(ch):
-    if unicodedata.combining(ch):
-        return 0
-    return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
-
-
-def cols(text):
-    """How many terminal columns text takes (wide characters such as CJK and
-    most emoji take two)."""
-    return sum(char_cols(ch) for ch in text)
-
-
-def fit(text, width):
-    """Text cleaned and cut to width columns, ending in … when anything was cut."""
-    text = clean(text)
-    if width <= 0:
-        return ""
-    if cols(text) <= width:
-        return text
-    used, cut = 0, 0
-    for i, ch in enumerate(text):
-        if used + char_cols(ch) > width - 1:  # leave a column for …
-            break
-        used += char_cols(ch)
-        cut = i + 1
-    return text[:cut].rstrip() + "…"
+clean, char_cols, cols, fit = text.clean, text.char_cols, text.cols, text.fit
 
 
 def fit_parts(parts, width, sep=" · "):
@@ -88,20 +53,7 @@ def put(scr, y, x, text, attr=0):
         pass
 
 
-def ago(t, now=None):
-    seconds = max(0, (now or time.time()) - (t or 0))
-    if seconds < 90:
-        return "just now"
-    minutes = seconds / 60
-    if minutes < 60:
-        return f"{int(minutes)} min ago"
-    hours = minutes / 60
-    if hours < 24:
-        return f"{int(hours)} hour{'s' if int(hours) != 1 else ''} ago"
-    days = hours / 24
-    if days < 2:
-        return "yesterday"
-    return f"{int(days)} days ago"
+ago = text.ago
 
 
 def tab_count(record):
@@ -129,6 +81,9 @@ class Popup:
         self.buttons = {}  # footer buttons while confirming: name -> (x0, x1)
         self.view_tabs = {}  # header view names: view -> (x0, x1)
         self.scr = None
+        self.pruned = False
+        if self.cfg.get("_broken"):  # said where the user looks (nothing is pruned or suspended meanwhile)
+            self.message = f"config.toml has a problem ({self.cfg['_broken']}); earmark.py check says more"
         self.load()
 
     # ---------------------------------------------------------------- data
@@ -136,8 +91,11 @@ class Popup:
     def load(self):
         with store.locked():
             archive = store.load_archive()
-            if core.prune(archive, self.cfg, time.time()):
+            # Pruned once, when the popup opens (not on every filter key);
+            # never with a broken config.toml, which means defaults.
+            if not self.pruned and not self.cfg.get("_broken") and core.prune(archive, self.cfg, time.time()):
                 store.save_archive(archive)
+            self.pruned = True
         needle = self.filter.lower()
         if self.view == "workspaces":
             rows = core.closed_workspaces(archive, self.session)
@@ -258,7 +216,8 @@ class Popup:
         if self.confirm:
             text = (" Forget this closed workspace? Its sessions stay archived.  " if self.view == "workspaces"
                     else " Forget this session?  ")
-            text = fit(text, w - 1)
+            buttons = len("[ Forget ]") + 2 + len("[ Keep ]") + 2
+            text = fit(text, w - 1 - buttons if w - 1 - buttons >= 16 else w - 1)  # the buttons before the words
             put(scr, h - 1, 0, text, curses.A_BOLD)
             x = cols(text)
             for name, label in (("forget", "[ Forget ]"), ("keep", "[ Keep ]")):
@@ -309,9 +268,11 @@ class Popup:
         self.message = "Forgotten."
         self.load()
 
-    def row_at(self, y):
+    def row_at(self, y, h):
+        """The row drawn at screen line y (h: the popup's height): only the
+        list's own lines count, never the rule or help line below it."""
         n = self.top + (y - 2)
-        return n if 2 <= y < 2 + len(self.rows) - self.top and 0 <= n < len(self.rows) else None
+        return n if 2 <= y < min(2 + len(self.rows) - self.top, h - 2) and 0 <= n < len(self.rows) else None
 
     def on_mouse(self, scr):
         try:
@@ -342,15 +303,16 @@ class Popup:
             self.sel += 1
             self.clamp()
             return False
-        n = self.row_at(y)
+        n = self.row_at(y, scr.getmaxyx()[0])
         if n is None:
             return False
-        if b & curses.BUTTON1_DOUBLE_CLICKED:
+        on_forget = x >= w - FORGET_COL - 1
+        if b & curses.BUTTON1_DOUBLE_CLICKED and not on_forget:
             self.sel = n
             return self.do_open()
-        if clicked:
+        if clicked or b & curses.BUTTON1_DOUBLE_CLICKED:
             self.sel = n
-            if x >= w - FORGET_COL - 1:
+            if on_forget:  # the ×: a quick double-click forgets (after the confirm), never reopens
                 self.confirm = self.rows[n]["key"]
         return False
 

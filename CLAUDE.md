@@ -8,16 +8,24 @@ name, logo and palette). The reasons below matter as much as the rules.
 This file becomes public with the repo: no personal details, nothing about
 Cody's work setup.
 
-## Status (2026-11-21)
+## Status (2026-11-26)
 
-1.0.0, released and public (cwilliams5/herdr-earmark), MIT. Listed in
-Herdr's marketplace through the `herdr-plugin` topic. Live on the maintainer's Herdr
-from this clone (linked). Tests: 54 unit tests (Python 3.14 and 3.9) and
-`tests/live_check.sh` 20/20 with Codex and Grok. Later, not in 1.0: a
-right-click menu entry (if Herdr ever allows it), facts for Pi, Copilot and
-the other agents, smarter handling when CLAUDE_CONFIG_DIR differs between
-the shell and Herdr's server, dropping the Codex `--no-daemon` workaround
-once herdrdev/herdr#4649 is fixed.
+Public (cwilliams5/herdr-earmark), MIT, listed in Herdr's marketplace
+through the `herdr-plugin` topic. 1.0.0 released 2026-11-21; 1.1.0 released
+2026-11-26: suspend tabs in place (docs/PLAN.md phase I) and
+CLAUDE_CONFIG_DIR read from each Claude process (phase J), after eight
+strict-review rounds. Live on the maintainer's Herdr from this clone
+(linked). Tests: 679 unit tests (Python 3.14; the syntax is checked for
+3.9); `tests/mutate.py` plants the 970 one-line regressions in
+`tests/mutations.md` (our own, plus the independent sets of the round 2-8
+reviewers, no duplicates; all caught after round 8's fixes), refusing a
+mutant that doesn't compile; `--shard i/n` runs it in
+parallel (6 shards, ~35 min; wait on their PIDs, never a pgrep of their
+command). Numbers from re-planting our own list flatter us, so each review
+round brings fresh ones. `tests/live_check.sh` 18/18 (run in an isolated
+HOME, see "Working on it"). Later: a right-click menu entry (if
+Herdr ever allows it), facts for Pi, Copilot and the other agents, dropping
+the Codex `--no-daemon` workaround once herdrdev/herdr#4649 is fixed.
 
 ## What Earmark is
 
@@ -46,6 +54,13 @@ with their names and folders, agent tabs resuming their sessions; the rest
 of that workspace's archive stays in the archive. Splits are not restored:
 each tab comes back with one pane.
 
+Suspend (1.1): an idle agent's tab can be suspended in place to free its
+memory. The agent is stopped (SIGTERM), the tab stays, and a placeholder in
+its pane shows the agent's last screen (or a notice) with "Press Enter to
+resume"; Enter replaces the placeholder with the agent's resume command in
+the same pane. Modes: off (shipped default), manual (the key), time, memory,
+count. Like a browser's sleeping tabs.
+
 Decided so far (details in `docs/PLAN.md`):
 - **No right-click menu entry.** Herdr 0.9.5 has no documented way for a
   plugin to add items to its context menus (plugin UI is terminal panes and
@@ -53,6 +68,31 @@ Decided so far (details in `docs/PLAN.md`):
 - **The sidebar count is opt-in.** Earmark can report a workspace metadata
   token (`$earmark`, e.g. "3 archived"); it only shows if the user adds the
   token to their sidebar rows, and a setting turns the reporting off.
+- **Suspend is in place and opt-in.** The tab keeps its place and name
+  (plus a 💤 mark, display only); nothing moves to a list. The parking
+  rule, in every automatic mode: never an agent that's working, blocked,
+  in the tab in view, holding unsent prompt text, running a command (a
+  shell under it, or anything else in its terminal's foreground group),
+  waiting on a Claude timer (ScheduleWakeup / CronCreate since its process
+  started), with Remote Control on, started with options Earmark doesn't
+  know, or where Earmark can't read the prompt; an unseen result ("done")
+  only with `suspend_unseen` (default on, Cody's call 2026-11-25); memory
+  and count modes also need 10 quiet minutes. The key may take the tab in
+  view; never a working or blocked agent or one with unsent text, nor a
+  Codex started without --no-daemon; an unreadable prompt, unknown
+  options, a status Herdr can't tell or a Claude folder Earmark can't read
+  are asked about in Earmark's message popup (earmark/message.py), and
+  only `y` then Enter there confirms (Herdr's notifications follow `[ui.toast]
+  delivery`, off by default, so nothing important goes only there).
+  `messages = "toast"` (Cody's ask, 2026-11-26: the popup takes the
+  keyboard) answers in Herdr's toasts instead, with the old second press
+  within 10 s, going by Herdr's own reply: a toast Herdr says it didn't
+  show (off, rate limited, busy, no client), or no answer, goes to the
+  popup, and only a shown "press again" starts the window.
+  The idle clock counts from the agent's last activity or the moment the
+  user left its tab.
+- **No daemon.** Automatic checks run in a short-lived worker that a hook
+  starts at most once a minute (so nothing happens while Herdr is quiet).
 - **Cleanup follows the agent:** with `keep_days` unset (the default),
   sessions of agents Earmark can look into (Claude Code, Codex, Grok) stay
   exactly as long as the agent keeps them, whatever retention the user set
@@ -87,11 +127,15 @@ Decided so far (details in `docs/PLAN.md`):
 - Ids:
   - Herdr plugin id `io.github.cwilliams5.earmark`
   - actions `open` (key binding target `io.github.cwilliams5.earmark.open`,
-    for example `prefix+a`) and `open-workspaces` (for example `prefix+shift+a`)
+    for example `prefix+a`), `open-workspaces` (for example `prefix+shift+a`)
+    and `suspend` (for example `prefix+ctrl+s`; `prefix+s` is Herdr's settings)
   - settings: `config.toml` in the plugin's config dir
     (`HERDR_PLUGIN_CONFIG_DIR`, see `herdr plugin config-dir <id>`)
   - archive: `archive.json` in the plugin's state dir
-    (`HERDR_PLUGIN_STATE_DIR`)
+    (`HERDR_PLUGIN_STATE_DIR`); suspended records in `index.json`
+    (`sessions.<name>.suspended.<pane>`), screen copies in `screens/`,
+    Claude timer read offsets in `timers-<hash of the session>.json`, the worker's log in
+    `worker.log`
   - workspace metadata token `$earmark`
   - log prefix `earmark:`
 - Branding: `branding/` (`python3 branding/build.py` regenerates it). See
@@ -101,7 +145,8 @@ Decided so far (details in `docs/PLAN.md`):
 
 ```
 herdr-plugin.toml   the manifest: actions, the popup pane, hooks
-earmark.py          entry point: open, open-workspaces, popup, hook, list, check
+earmark.py          entry point: open, open-workspaces, popup, suspend, hook,
+                    list, check; for itself: suspended (placeholder), worker
 earmark/
   herdr.py          the Herdr CLI calls (through HERDR_BIN_PATH)
   store.py          index.json / archive.json in the state dir, one lock
@@ -110,14 +155,43 @@ earmark/
   agents.py         resume commands (Herdr's table), Claude transcript facts
   config.py         config.toml (every key documented there)
   ui.py             the curses popup (Sessions / Workspaces views)
+  suspend.py        suspend: facts per agent pane, the parking rule, the
+                    worker (auto modes, the key, re-arm after a restart),
+                    resume on view, the records' lifecycle
+  placeholder.py    the placeholder in a suspended tab (raw termios; loads
+                    neither curses nor sqlite3, which only Codex facts use)
+  message.py        the suspend key's popup: its answers, and "suspend
+                    anyway?" which only `y` confirms
+  text.py           text helpers shared by the popup and the placeholder
+  procs.py          process table, start times, one environment variable,
+                    memory (Linux /proc, `ps` elsewhere)
 tests/
+  _isolate.py       imported first by every test file: no real Herdr
+                    (HERDR_BIN_PATH points nowhere), temp state, settings
+                    and agent folders
   test_core.py      unit tests (python3 -m unittest discover tests)
+  test_review_fixes.py  one test per pre-release review finding
+  test_suspend.py   suspend and CLAUDE_CONFIG_DIR (phases I, J)
+  test_review1.py   strict review 1 (R1-R26) and its mutation survivors
+  test_review2.py   strict review 2 (R27-R52) and both reviewers' survivors
+  test_review3.py   strict reviews 3-6 (R53-R134) and their reviewers' survivors
+  test_flows.py     behaviour tests over whole sequences through the real
+                    code (a placeholder started, lost and back; what a hook
+                    starts in each mode; the account check; the permission
+                    mode at exit; strict reviews 7-8)
+  test_surfaces.py  behaviour tests where review 7's mutations got through:
+                    the popup driven by keys and clicks, the message popup's
+                    keys on a raw pty, the worker's command line, a closed
+                    workspace's round trip, each path a record takes
+  mutate.py         plants each regression in tests/mutations.md in a copy
+                    of the repo and runs the suite (python3 tests/mutate.py
+                    [name filter]); a pattern that no longer matches counts
+                    as a failure
   live_check.sh     end-to-end against a throwaway named Herdr session
 branding/           logo system (build.py), the pick in eartag/, alternatives/
 media/              README images: hero.png, workspaces.png, reopen.gif,
                     restore.gif, social-preview.png; shoot/ has the
                     scripts and the method (staged demo session)
-tests/test_review_fixes.py  one test per pre-release review finding
 docs/PLAN.md        the development plan and log
 ```
 
@@ -164,6 +238,55 @@ docs/PLAN.md        the development plan and log
 - **Names:** `core.names()` shows the user's pane or tab name first (Herdr's
   default labels, "Initial" or a number, don't count), the agent's title
   dimmed after it; `title_first = "agent"` swaps them.
+- **Suspend** (earmark/suspend.py has the who-does-what): a hook starts
+  `earmark.py worker` (detached, its own session, log in worker.log) when a
+  check is due, after a restart (`--rearm`) or for the key (`--pane`). The
+  worker looks at each candidate (`pane process-info`, the process table,
+  the agent's files, `pane read --format ansi` for unsent text), then for
+  each chosen pane: writes the record ("stopping"), saves the screen,
+  checks the processes' start times, focus and status once more, SIGTERMs
+  the agent and its launcher only (`chain_to`: never the whole group;
+  anything else in the group made it "busy"), waits for the shell to be
+  back, sets
+  "suspended", waits for Herdr to stop listing the agent (wait_released;
+  see the platform facts), sends Ctrl+C, then Ctrl+E Ctrl+U, and types
+  `placeholder && cd <cwd> && [CLAUDE_CONFIG_DIR=...] <resume argv>` with
+  `pane run` (arm: only into a bare shell, one arm at a time under a claim,
+  not while Herdr still lists the session unless it's the key, backing off
+  half an hour after a start that failed; an automatic arm, anything but
+  the key or the suspend's own, also needs `untouched`: a fingerprint of
+  the screen the same at two looks STABLE seconds apart since Earmark saw
+  the shell back (a change after a restart is watched again, otherwise the
+  shell is marked used and left to the key); the line carries
+  `--state`/`--config`, since a pane's
+  shell lacks Herdr's plugin variables), then marks the tab
+  (`tab_mark`, display only: `core._unmarked` strips it wherever a name is
+  recorded; hooks take stale marks off). The placeholder sets "waking" and
+  exits 0, and the shell starts the agent as a new job; any refusal,
+  Ctrl+C or hangup exits 1 and the shell starts nothing.
+  `core.settle_suspended` ends records: open in another pane → gone; in its
+  own pane only once "waking" or after STOP_STALE (Herdr shows a stopped
+  session for a moment); pane gone → archived "closed"; waking with no
+  session after RESUME_GRACE → archived "exited"; another session in its
+  pane → archived "replaced"; a "stopping" record whose worker died →
+  "suspended" (the regular re-arm pass starts its placeholder). Missing
+  placeholders: a restart sets `rearm` (`--rearm`, rearm_all waits for the
+  panes); otherwise a hook starts `--rearm-pass` at most once a minute in
+  every mode where no automatic check runs (`suspend.waiting`), and an
+  automatic check runs the pass itself. Herdr's agent field isn't proof, so the worker's
+  check_pane looks at processes: the agent relaunched by Herdr's restore
+  ends the record, a bare shell gets its placeholder back. Enter is only
+  ever sent when the placeholder is the pane's foreground (checked right
+  before; the placeholder also discards any keys still queued when it
+  exits, so a late Enter can't reach the agent starting). The record keeps
+  hashed fingerprints of the agent's account settings (`agents.account_env`:
+  ANTHROPIC_*, cloud profiles, OPENAI_*, proxies); the placeholder, which
+  runs in the shell the resume will, compares its own environment on Enter
+  and asks for a second Enter when they differ (a shell's later exports
+  aren't in its /proc environ, so the check can't happen at suspend time).
+  Notes carry `since`,
+  `focused_at`, `status_at` (the idle clock) and `config_dir` between
+  snapshots (core.CARRY).
 - **Sidebar count:** after a change, `workspace report-metadata <id>
   --source <plugin id> --token earmark=...` (the id must come first). Shown
   only if the user adds `$earmark` to `ui.sidebar.spaces.rows`.
@@ -182,6 +305,19 @@ Herdr 0.9.5 (Omarchy 4.5.0, Claude Code 2.1.330):
   "Native non-terminal plugin UI" and runtime action registration are not
   in v1. Keys bind to actions with `[[keys.command]]`,
   `type = "plugin_action"` in the user's Herdr `config.toml`.
+- **Notifications:** `herdr notification show` follows `[ui.toast]
+  delivery`, which is `"off"` by default (Herdr's CLI and config
+  references; `herdr --default-config`), and answers `{"shown": bool,
+  "reason": "shown" | "disabled" | "rate_limited" | "no_foreground_client" |
+  "busy"}` (`herdr api schema`). Anything the user must see goes through
+  Earmark's own popup (`earmark/message.py`) unless Herdr says it showed it.
+  Plugin popups have no pane id anyone can find: they're not in `pane list`
+  or `api snapshot`, and `plugin pane open` answers only `{"type": "ok"}`
+  (checked 2026-11-26), so nothing outside can type into one. A popup
+  opened with `--no-focus` leaves the keyboard where it was: the maintainer
+  typed on in a pane while one opened, every key reached the pane, and the
+  popup closed by itself (checked by hand 2026-11-26; a headless server
+  can't show it).
 - **Session references:** `pane.list` / `pane.get` expose
   `agent_session = { source, agent, kind, value }` when an integration has
   reported one (for Claude Code, `value` is the session id), plus `cwd`,
@@ -265,6 +401,66 @@ Herdr 0.9.5 (Omarchy 4.5.0, Claude Code 2.1.330):
   <id>`. A session that never got a message writes no transcript at all,
   and one that only ran `/exit` writes only local-command records: neither
   has anything to resume, so Earmark skips them.
+- **Suspend facts (verified 2026-11-25 in an isolated Herdr, real Claude
+  Code 2.1.332):**
+  - `pane read` answers with the text itself (not JSON), lines ending in
+    CRLF; `--format ansi` keeps the colours. `--source visible` follows the
+    user's scroll position (a pane scrolled up gives the scrolled-to part);
+    `--source recent --lines <viewport_rows>` gives the bottom screen, and
+    a full-screen program's screen (checked 2026-11-26). Earmark reads that
+    way (`suspend.screen_of`).
+  - A pane's `revision` moves with its folder and title, not with typing or
+    output (checked 2026-11-26): it can't tell whether a shell was used, so
+    Earmark compares the screen.
+  - `pane process-info` gives `shell_pid`, `foreground_process_group_id` and
+    `foreground_processes[{pid, name, argv, cmdline, cwd}]`; a bare shell
+    has its own pid as the foreground group.
+  - Claude Code exits cleanly on SIGTERM (prints its "Resume this session
+    with" hint; transcript intact). Herdr can still show its session in the
+    pane for a moment after the process is gone.
+  - Claude's prompt box is the text between the last two `─` rules on
+    screen, after `❯`; an empty one shows a faint `Try "..."` hint.
+  - Claude writes a Shift+Tab permission-mode change to its transcript only
+    when it exits (entering auto is written at once; plan and manual
+    aren't), re-stamping the mode in force on SIGTERM; its footer shows the
+    mode ("⏵⏵ auto mode on", "⏵⏵ bypass permissions on", "⏸ plan mode on",
+    "⏸ manual mode on"). Checked live 2026-11-26, Claude Code 2.1.33x.
+    Earmark reads the mode again after the stop (`agents.mode_to_resume`).
+  - Claude's transcripts record `permission-mode` records
+    (`permissionMode`, e.g. "auto") and every tool call with a
+    `timestamp` (ScheduleWakeup `delaySeconds`/`stop`, CronCreate,
+    CronDelete). `<config>/sessions/<pid>.json` is Claude's registry of
+    running processes: `status` (idle / busy / shell), `bridgeSessionId`
+    when Remote Control is on. A Claude Bash tool call or Monitor runs
+    under it as `bash -c source <config>/shell-snapshots/...`.
+  - In a headless server nothing is ever "seen": answers stay `done` until
+    a focus command (`tab focus`) marks them seen (`idle`).
+  - The action context (`HERDR_PLUGIN_CONTEXT_JSON`) has
+    `focused_pane_id`; `herdr plugin action invoke <id>.<action>` runs an
+    action from the CLI.
+  - Pane ids survive a server restart (the placeholder is re-armed by id).
+  - **A command typed into the shell right after the agent exits, before
+    Herdr sees the shell's prompt, leaves Herdr listing the stopped agent**
+    (`agent` and `agent_session`) indefinitely, and Herdr's restore then
+    relaunches it. Waiting until Herdr lets go (about a second) avoids it:
+    tested 0 s wait → stale twice, 2 s → clean twice. Claude's Herdr hook
+    reports only SessionStart; Herdr notices exits itself.
+  - **Never exec the agent in the placeholder's place** (1.1 development,
+    found on the maintainer's machine 2026-11-25): the agent kept the
+    placeholder's pid and process group, Herdr didn't register it as an
+    agent again, and on the next suspend Herdr still listed the session; a
+    `claude --resume <id>` line then reached the shell at the same moment as
+    Earmark's placeholder line and they ran glued together, so Claude got
+    Earmark's command as a first prompt. The shell starting the agent as a
+    new job keeps Herdr's view right; Ctrl+E Ctrl+U before typing and the exact
+    placeholder match (`is_placeholder`) are the backstops.
+  - Once stale, nothing a plugin can call clears `agent_session`:
+    `pane release-agent --seq <ns>` and the socket's
+    `pane.clear_agent_authority` clear `agent` only; a custom-source
+    `report-agent` (from inside or outside the pane) doesn't replace an
+    official agent.
+  - `pane report-agent-session` from a custom source is accepted but not
+    shown as `agent_session`; only an official source (`herdr:claude`) is.
 - **Herdr workspaces** may share a folder (a common setup),
   so a session's folder can't identify its workspace; the workspace must be
   recorded at close time.
@@ -278,6 +474,20 @@ Herdr 0.9.5 (Omarchy 4.5.0, Claude Code 2.1.330):
 - `EARMARK_AGENTS="codex grok" tests/live_check.sh` adds a close, reopen,
   close-again cycle per agent (each must be installed and signed in; 20
   checks pass as of 2026-11-21).
+- **Testing new code without touching the live Herdr: an isolated HOME.**
+  The linked clone runs in every session of the maintainer's Herdr, so
+  unfinished code goes in a git worktree (e.g. in a scratch folder) and is
+  tested against a Herdr with its own HOME:
+  `ET=$(mktemp -d /tmp/et.XXXX)` (short: socket path limit), then with
+  `env -i HOME=$ET PATH=<claude's dir>:/usr/bin:/bin TERM=xterm-256color
+  LANG=C.UTF-8 SHELL=/bin/bash`: `herdr plugin link <worktree>`, `setsid
+  nohup herdr --session t server`. For real Claude sessions, symlink
+  `$ET/.claude` to `~/.claude` (auth, the Herdr hook) and copy
+  `~/.claude.json` to `$ET` (mode 600; delete afterwards). Earmark's
+  Python then runs with `HERDR_SOCKET_PATH=$ET/.config/herdr/sessions/t/herdr.sock
+  HERDR_SESSION=t HERDR_PLUGIN_STATE_DIR=... HERDR_PLUGIN_CONFIG_DIR=...`.
+  `tests/live_check.sh` runs the same way (`env -i HOME=$ET ...
+  XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR bash tests/live_check.sh`).
 - `tests/live_check.sh`: about two minutes against a throwaway named session
   (`earmark-live-check`) with real Claude Code sessions (one-word prompts
   in `$XDG_RUNTIME_DIR/earmark-live-check`, a private folder Claude Code is
@@ -345,6 +555,13 @@ not at release.
 - `pedroloch/herdr-undo-close`: documented that `tab.closed` carries no tab
   contents, so state must be indexed before a close (idea only).
 - The `codex --no-daemon` workaround documented in herdrdev/herdr#4649.
+- Suspend learned from six Herdr sleep/park plugins reviewed 2026-11-25
+  (ideas only, no code taken): common-resources/herdr-autopark (frozen
+  view, unsent-text check), novarii/claude-hibernate (pending timers from the
+  transcript, resume flags and permission mode), 0xArchiviste/herdr-memory-guard
+  (MemAvailable thresholds), bengemine/herdr-hibernate, meta-boy/herdr-shelve
+  and utkrshm/herdr-rest (records first, re-check before acting; herdr-rest
+  has no license, so nothing but the idea).
 - Claude Code, Codex and Grok's own session files: read (never written) for
   titles, last activity and whether a session still exists; formats learned
   from the files themselves.
@@ -373,8 +590,8 @@ updates"):
 3. Re-check README claims against the code; re-shoot media if the popup
    changed (`media/shoot/README.md`).
 4. A fresh correctness review of the changes for anything substantial.
-5. `~/.claude/skills/go-public/scripts/privacy-scan.sh ~/Work/herdr-earmark`
-   as the last step before pushing.
+5. The go-public skill's privacy scan (`scripts/privacy-scan.sh`) as the
+   last step before pushing.
 6. Release notes shown to Cody first, then `gh release create vX.Y.Z
    --title "Earmark X.Y.Z" --notes-file notes.md`.
 7. The marketplace needs nothing: Herdr indexes repos with the
