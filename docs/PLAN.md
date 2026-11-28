@@ -17,8 +17,8 @@ repo). Live check 34/34 with Claude Code, Codex and Grok; 857 unit tests on
 Python 3.14 and 3.9; installed from GitHub in a throwaway home (the launcher
 pointed into Herdr's install folder and worked).
 
-- [ ] Cody: upload `media/social-preview.png` (repo Settings > Social
-      preview; GitHub has no API for it).
+- [x] Cody: upload `media/social-preview.png` (repo Settings > Social
+      preview; GitHub has no API for it). Done 2026-11-28.
 
 ## Later (not scheduled)
 
