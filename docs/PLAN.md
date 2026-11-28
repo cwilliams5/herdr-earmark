@@ -10,38 +10,15 @@ workspace notes, the coloured sidebar, strict reviews 9 and 10, findings
 R168 to R210) is summed up in CLAUDE.md and the 1.2 release notes; its
 review reports are kept outside the repo.
 
-## Now: release 1.2.0
+## Released: 1.2.0 (2026-11-27)
 
-Built, reviewed (strict reviews 9 and 10: the second found no critical or
-high), README media done; on the local `main`, live on the maintainer's
-Herdr, not pushed. The ship-update skill (go-public's updates.md) has the
-steps; CLAUDE.md's "Releasing" has this project's.
+v1.2.0 = 91cc7a4 (squashed; the unsquashed history is backed up outside the
+repo). Live check 34/34 with Claude Code, Codex and Grok; 857 unit tests on
+Python 3.14 and 3.9; installed from GitHub in a throwaway home (the launcher
+pointed into Herdr's install folder and worked).
 
-- [x] Codex and Grok live check: `EARMARK_AGENTS="codex grok"
-      tests/live_check.sh` in an isolated HOME (CLAUDE.md, "Working on it").
-      34/34 (2026-11-27; the check's `rows --apply` step now turns
-      write_herdr_config on itself, and checks nothing is written while off).
-- [x] The unit tests on Python 3.9 (`mise exec python@3.9 -- python -m
-      unittest discover tests`, then `mise uninstall` it). 857 OK, 2 skipped
-      (they need tomllib).
-- [x] Re-check the sidebar width model, where the client keeps a dragged
-      width, and the plugin install layout against the installed Herdr's
-      source (CLAUDE.md, Releasing step 3); look at the real sidebar,
-      dragged too. Herdr still 0.9.5, checked line by line by both review 10
-      reviewers; the README shoot's sidebar showed full lines, nothing cut.
-      The install layout gets its real test from the public URL after push.
-- [x] README "Tested with" (Herdr, Claude Code, Codex, Grok, Pythons):
-      unchanged, all still true (Herdr 0.9.5, Claude Code 2.1.332, Codex
-      0.172, Grok 1.0.92, Python 3.14 and 3.9). Built on credits 1.2's
-      idea sources.
-- [ ] Squash the 1.2 history into one commit on top of 1.1.0 (Cody,
-      2026-11-27), after backing it up in a bundle, as for 1.1.
-- [ ] The privacy scan (go-public `scripts/privacy-scan.sh`) over everything
-      to be pushed, last.
-- [ ] Release notes shown to Cody; push; `gh release create v1.2.0`; upload
-      `media/social-preview.png` by hand (Settings > Social preview).
-- [ ] Afterwards: CLAUDE.md status, the maintainer's dotfiles (which mention
-      the version).
+- [ ] Cody: upload `media/social-preview.png` (repo Settings > Social
+      preview; GitHub has no API for it).
 
 ## Later (not scheduled)
 

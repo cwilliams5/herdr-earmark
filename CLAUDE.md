@@ -12,28 +12,21 @@ Cody's work setup.
 
 Public (cwilliams5/herdr-earmark), MIT, listed in Herdr's marketplace
 through the `herdr-plugin` topic. 1.0.0 released 2026-11-21; 1.1.0 released
-2026-11-26: suspend tabs in place (docs/PLAN.md phase I) and
-CLAUDE_CONFIG_DIR read from each Claude process (phase J), after eight
-strict-review rounds. 1.2.0 is built (docs/PLAN.md phases K-M): one-call
-snapshot (K), workspace notes and the /herdr-note skill (L), coloured agent
-lines and workspace counts in Herdr's sidebar (M). It is merged into the
-local `main` and live on the maintainer's Herdr from this clone (linked),
-but NOT pushed: `main` on GitHub stays at 1.1.0 until phase N is done (the
-full regression run, one strict-review loop over all of 1.2, README media,
-then the release, squashed into one commit like 1.1); its strict-review loop
-(rounds 9 and 10) is done. Tests: 857 unit tests
-(Python 3.14; the syntax is checked for 3.9); `tests/mutate.py` plants the
-1,142 one-line regressions in `tests/mutations.md` (our own, plus the
-independent sets of the round 2-10 reviewers; all caught 2026-11-27), each
-suite run in a scratch HOME of its own, refusing a
-mutant that doesn't compile; `--shard i/n` runs it in
-parallel (6 shards, ~35 min; wait on their PIDs, never a pgrep of their
-command). Numbers from re-planting our own list flatter us, so each review
-round brings fresh ones. `tests/live_check.sh` 25/25 with Claude Code
-(2026-11-26; Codex and Grok still to run for 1.2; run in an isolated
-HOME, see "Working on it"). Later: a right-click menu entry (if
-Herdr ever allows it), facts for Pi, Copilot and the other agents, dropping
-the Codex `--no-daemon` workaround once herdrdev/herdr#4649 is fixed.
+2026-11-26 (suspend tabs in place, CLAUDE_CONFIG_DIR read from each Claude
+process, after eight strict-review rounds); **1.2.0 released 2026-11-27**
+(v1.2.0 = 91cc7a4, its history squashed into that one commit like 1.1):
+one-call snapshot, workspace notes and the /herdr-note skill, coloured agent
+lines and workspace counts in Herdr's sidebar, the launcher in the config
+dir, after strict reviews 9 and 10. Live on the maintainer's Herdr from this
+clone (linked). Tests: 857 unit tests (Python 3.14 and 3.9); `tests/mutate.py`
+plants the 1,142 one-line regressions in `tests/mutations.md` (our own, plus
+the independent sets of the round 2-10 reviewers; all caught 2026-11-27),
+each suite run in a scratch HOME of its own, refusing a mutant that doesn't
+compile; `--shard i/n` runs it in parallel (6 shards, ~35 min; wait on their
+PIDs, never a pgrep of their command). Numbers from re-planting our own list
+flatter us, so each review round brings fresh ones. `tests/live_check.sh`
+34/34 with Claude Code, Codex and Grok (2026-11-27; run in an isolated HOME,
+see "Working on it"). What's left is in docs/PLAN.md (the Later list).
 
 ## What Earmark is
 
