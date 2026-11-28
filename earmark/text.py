@@ -14,15 +14,34 @@ def clean(text):
 
 
 def char_cols(ch):
-    if unicodedata.combining(ch):
+    if unicodedata.combining(ch) or ch in "\u200b\u200c\u200d\ufe0e\ufe0f":  # marks, joiners, selectors
         return 0
     return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
 
 
 def cols(text):
-    """How many terminal columns text takes (wide characters such as CJK and
-    most emoji take two)."""
-    return sum(char_cols(ch) for ch in text)
+    """How many terminal columns text takes, counted as Herdr's unicode-width
+    does: wide characters (CJK, most emoji) two; an emoji sequence (a
+    character made an emoji by U+FE0F, people joined with U+200D, a skin
+    tone) two in all."""
+    total = last = 0
+    joined = False
+    for ch in text:
+        if joined:  # the character after a joiner is part of the same emoji
+            joined = False
+            continue
+        if ch == "\u200d":
+            joined = last > 0
+            continue
+        if ch == "\ufe0f" and last == 1:  # emoji presentation: wide
+            total, last = total + 1, 2
+            continue
+        if "\U0001f3fb" <= ch <= "\U0001f3ff" and last:  # a skin tone on the emoji before it
+            continue
+        width = char_cols(ch)
+        total += width
+        last = width or last
+    return total
 
 
 def fit(text, width):
@@ -53,6 +72,7 @@ def wrap_cols(para, width):
                     break
                 used += char_cols(ch)
                 cut = i + 1
+            cut = max(cut, 1)  # a character wider than the line still moves it on
             if line:
                 out.append(line)
                 line = ""

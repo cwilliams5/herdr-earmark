@@ -25,6 +25,8 @@ from test_suspend import (CFG, T0, SuspendPaneTests, agent_info, claude_screen, 
                           shell_info, snap, typed)
 from test_review1 import CFG_TIME, StateDir, iso  # noqa: E402
 
+CFG_SIDEBAR = dict(config.DEFAULTS, sidebar=dict(config.SIDEBAR_DEFAULTS), colors=dict(config.COLOR_DEFAULTS))
+
 FACTS = {"known": True, "exists": True, "has_content": True, "title": "", "last_active": T0}
 
 
@@ -658,16 +660,26 @@ class ApplyMoreTests(unittest.TestCase):
         self.assertEqual(self.archive["entries"]["claude:s1"]["config_dir"], "/cfg")
 
     def test_a_restart_resends_the_sidebar_tokens(self):
+        cache = {"sessions": {}}
+        s = snap([pane("w1:p1")])
         self.apply([pane("w1:p1")], T0)
-        self.index["sessions"]["default"]["reported"] = {"w1": "1 archived"}
-        self.apply([pane("w1:p1")], T0 + 5, event="startup")
-        self.assertEqual(self.index["sessions"]["default"]["reported"], {"w1": ""})  # sent again unless empty
+        self.assertTrue(core.pending_reports(self.index, self.archive, "default", s, CFG_SIDEBAR, cache))
+        self.assertEqual(core.pending_reports(self.index, self.archive, "default", s, CFG_SIDEBAR, cache), [])
+        self.apply([pane("w1:p1")], T0 + 5, event="startup")  # tokens didn't survive the restart
+        again = core.pending_reports(self.index, self.archive, "default", s, CFG_SIDEBAR, cache)
+        self.assertEqual([(w, t) for w, t, _ in again], [("w1", {"earmark_done": "1"})])  # nothing to clear
 
     def test_tokens_are_sent_only_when_they_change(self):
+        cache = {"sessions": {}}
         self.apply([pane("w1:p1")], T0)
         s = snap([pane("w1:p1")])
-        self.assertEqual(len(core.pending_reports(self.index, self.archive, "default", s)), 1)
-        self.assertEqual(core.pending_reports(self.index, self.archive, "default", s), [])
+        self.assertEqual(len(core.pending_reports(self.index, self.archive, "default", s, CFG_SIDEBAR, cache)), 1)
+        self.assertEqual(core.pending_reports(self.index, self.archive, "default", s, CFG_SIDEBAR, cache), [])
+        working = snap([pane("w1:p1", status="working")])
+        self.assertEqual([t for _, t, _ in core.pending_reports(self.index, self.archive, "default", working,
+                                                                  CFG_SIDEBAR, cache)],
+                         [{"earmark_blocked": None, "earmark_working": "1", "earmark_done": None,
+                           "earmark_suspended": None, "earmark_archived": None, "earmark_note": None}])  # whole
 
     def test_a_workspace_of_plain_tabs_is_remembered(self):
         self.assertTrue(core.record_closed_workspace(self.archive, "default", "w1",
@@ -889,9 +901,11 @@ class TransportMoreTests(unittest.TestCase):
         argv = run.call_args.args[0]
         self.assertEqual(argv[argv.index("--source") + 1:argv.index("--source") + 4], ["recent", "--lines", "40"])
         with mock.patch.object(herdr.subprocess, "run", return_value=mock.Mock(returncode=0, stdout=b"x\r\n")) as run:
-            herdr.read_screen("w1:p1")  # a Herdr that doesn't say the pane's height: the screen, not the scrollback
+            herdr.read_screen("w1:p1")  # a Herdr that doesn't say the pane's height: still from the bottom
         argv = run.call_args.args[0]
-        self.assertEqual(argv[argv.index("--source") + 1], "visible")
+        self.assertEqual(argv[argv.index("--source") + 1:argv.index("--source") + 4],
+                         ["recent", "--lines", str(herdr.RECENT_LINES)])
+        self.assertNotIn("visible", argv)
 
 
 if __name__ == "__main__":

@@ -140,8 +140,10 @@ class BrokenConfigTests(StateDir):
         self.assertEqual(store.load_archive(), before)
 
     def test_every_key_and_value_is_checked(self):
-        for text in ('keep_days = "0"\n', "keep_days = -1\n", "keep_day = 0\n", "report_count = 1\n",
-                     'title_first = "name"\n', '[resume]\nclaude = "claude --resume {id}"\n', 'suspend = "on"\n'):
+        for text in ('keep_days = "0"\n', "keep_days = -1\n", "keep_day = 0\n",
+                     'title_first = "name"\n', '[resume]\nclaude = "claude --resume {id}"\n', 'suspend = "on"\n',
+                     '[sidebar]\ncounts = ["nope"]\n', '[sidebar]\ncounts_line = "below"\n',
+                     '[sidebar]\ncontext_levels = [90, 70]\n', '[colors]\ndone = "green"\n', 'sidebar = 1\n'):
             self.settings(text)
             self.assertTrue(config.load().get("_broken"), text)
             self.assertTrue(config.check(), text)
@@ -1096,20 +1098,22 @@ class EnvironmentReadTests(unittest.TestCase):  # R75
         self.assertTrue(all(e.strip().startswith('"command"') for e in examples), examples)
 
 
-class SidebarOffTests(unittest.TestCase):  # R76
-    def test_turning_the_count_off_clears_it_once(self):
+class SidebarOffTests(unittest.TestCase):  # R76, 1.2: 1.1's token goes once
+    def test_the_old_archived_token_is_cleared_once(self):
         with tempfile.TemporaryDirectory() as d, \
                 mock.patch.dict(os.environ, {"HERDR_PLUGIN_STATE_DIR": d, "HERDR_PLUGIN_CONFIG_DIR": d}):
             with open(os.path.join(d, "config.toml"), "w") as f:
-                f.write("report_count = false\n")
+                f.write("report_count = false\n")  # retired: no effect, and no problem
             store.save_index({"sessions": {"default": {"panes": {}, "reported": {"w1": "3 archived"}}}})
             sent = []
             with mock.patch.object(herdr, "snapshot", return_value=snap([])), \
-                    mock.patch.object(core, "send_reports", side_effect=lambda r: sent.append(list(r))), \
+                    mock.patch.object(core, "send_reports", side_effect=lambda r, s: sent.append(list(r))), \
                     mock.patch.object(suspend, "spawn_worker", return_value=True):
                 core.handle_event("pane.focused", {"data": {}}, env={})
                 core.handle_event("pane.focused", {"data": {}}, env={})
-            self.assertEqual([[(w, t) for w, t, _ in r] for r in sent], [[("w1", "")], []])
+            self.assertEqual([[(w, t) for w, t, _ in r] for r in sent], [[("w1", {"earmark": None})], []])
+            self.assertNotIn("reported", store.load_index()["sessions"]["default"])
+            self.assertNotIn("_broken", config.load())
 
 
 # ------------------------------------------- round 4 reviewer's survivors
@@ -1134,10 +1138,13 @@ class R4SurvivorTests(StateDir):
         self.assertNotIn("--cwd", run.call_args.args)
 
     def test_a_zero_count_clears_the_token(self):
+        from earmark import sidebar
+        values = dict.fromkeys(config.COUNT_ITEMS, 0)
+        tokens = sidebar.count_tokens(sidebar.fit_counts("Work", values, list(config.COUNT_ITEMS), "same", 30))
+        self.assertEqual(set(tokens.values()), {None})  # a zero is never shown
         with mock.patch.object(herdr, "run") as run:
-            herdr.report_count("w1", "", 5)
-        self.assertIn("--clear-token", run.call_args.args)
-        self.assertEqual(core.count_text(0), "")
+            sidebar.report("workspace", "w1", tokens, 5)
+        self.assertEqual(run.call_args.args.count("--clear-token"), len(config.COUNT_ITEMS))
 
     def test_a_long_tab_mark_is_refused(self):
         self.assertEqual(config.suspend_settings({"tab_mark": "zzzzzzzzz"})["tab_mark"], "💤")
@@ -1203,14 +1210,14 @@ class R4SurvivorTests(StateDir):
             core.restore_workspace(record, CFG)
         self.assertEqual(calls, [("", True), ("", False), ("", False)])
 
-    def test_reporting_off_never_sends_a_count(self):
-        self.settings("report_count = false\n")
+    def test_an_empty_counts_list_sends_nothing(self):
+        self.settings("[sidebar]\ncounts = []\n")
         store.save_archive({"entries": {"claude:x": {"herdr_session": "default", "workspace_label": "Work",
                                                      "agent": "claude", "session_id": "x", "last_active": T0,
                                                      "closed_at": T0}}})
         sent = []
         with mock.patch.object(herdr, "snapshot", return_value=snap([])), \
-                mock.patch.object(core, "send_reports", side_effect=lambda r: sent.extend(r)), \
+                mock.patch.object(core, "send_reports", side_effect=lambda r, s: sent.extend(r)), \
                 mock.patch.object(agents, "session_facts", return_value=dict(FACTS)), \
                 mock.patch.object(suspend, "spawn_worker", return_value=True):
             core.handle_event("pane.focused", {"data": {}}, env={})

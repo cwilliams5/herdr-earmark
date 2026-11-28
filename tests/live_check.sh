@@ -57,11 +57,11 @@ wait_idle() {  # pane: until Claude is idle again after a prompt
     sleep 1
   done; return 1
 }
-claude_tab() {  # workspace label -> pane id running claude with one prompt answered
-  local r p
-  r=$($H tab create --workspace "$1" --cwd "$DIR" --label probe --no-focus)
+claude_tab() {  # workspace label [claude options...] -> pane id running claude
+  local r p ws=$1; shift
+  r=$($H tab create --workspace "$ws" --cwd "$DIR" --label probe --no-focus)
   p=$(echo "$r" | jq -r '.result.root_pane.pane_id')
-  $H pane run "$p" claude >/dev/null
+  $H pane run "$p" "claude $*" >/dev/null
   sleep 4
   # The first run asks whether to trust the folder, defaulting to "No, exit":
   # pick "Yes, I trust this folder".
@@ -158,10 +158,14 @@ PG=$(claude_tab "$GW"); SIDG=$(wait_session "$PG") || bad "no session in Gamma"
 prompt "$PG" || bad "Claude didn't answer"
 $H tab rename "$($H pane get "$PG" | jq -r '.result.pane.tab_id')" agent-work >/dev/null
 $H pane get "$PG" >/dev/null; sleep 1
+echo "Gamma: waiting on the deploy" | python3 "$ROOT/earmark.py" note write --workspace "$GW" --session "$S"
 $H workspace close "$GW" >/dev/null; sleep 2
 REC=$(jq -c --arg s "$S" '[.workspaces[]? | select(.herdr_session == $s and .label == "Gamma")][0]' "$STATE/archive.json")
 [ "$(echo "$REC" | jq '.tabs | length')" = 2 ] && ok "recorded Gamma with 2 tabs" || bad "record: $REC"
 [ "$(entry "$SIDG" workspace_label)" = Gamma ] && ok "its session archived under Gamma" || bad "session not archived"
+[ "$(echo "$REC" | jq -r '.note')" = "Gamma: waiting on the deploy" ] && ok "its note went with it" || bad "note: $(echo "$REC" | jq -c .note)"
+[ -z "$(python3 "$ROOT/earmark.py" note show --workspace "$GW" --session "$S")" ] \
+  && ok "the closed id's note file is gone" || bad "note file left behind"
 HERDR_SOCKET_PATH=$SOCK HERDR_SESSION=$S python3 - "$STATE" "$ROOT" "$S" <<'EOF2' || bad "restore failed"
 import json, os, sys
 sys.path.insert(0, sys.argv[2])
@@ -180,6 +184,8 @@ PR=$($H pane list | jq -r --arg w "$NW" '.result.panes[] | select(.workspace_id 
 [ -n "$PR" ] && [ "$(wait_session "$PR")" = "$SIDG" ] && ok "agent tab resumed its session" || bad "session not resumed"
 [ "$(jq --arg s "$S" '[.workspaces[]? | select(.herdr_session == $s)] | length' "$STATE/archive.json")" = 0 ] \
   && ok "closed-workspace record removed" || bad "record still there"
+[ "$(python3 "$ROOT/earmark.py" note show --workspace "$NW" --session "$S")" = "Gamma: waiting on the deploy" ] \
+  && ok "the note came back with the workspace" || bad "note not restored"
 
 say "6. suspend in place: the key, a restart, Enter to resume, closing"
 fgp() { $H pane process-info --pane "$1" 2>/dev/null | jq -r '[.result.process_info.foreground_processes[].name] | join(" ")'; }
@@ -201,6 +207,37 @@ $H pane send-keys "$P6" enter >/dev/null; sleep 2
 sleep 3; suspend_key "$P6"; sleep 2
 $H tab close "$($H pane get "$P6" | jq -r '.result.pane.tab_id')" >/dev/null; sleep 2
 [ "$(entry "$S6" reason)" = closed ] && ok "a closed suspended tab is archived" || bad "after closing: '$(entry "$S6" reason)'"
+
+say "8. 1.2: workspace counts, an agent line through the status line, the rows block"
+tokens() {  # workspace|pane id -> its sidebar tokens (JSON)
+  $H api snapshot | jq -c --arg id "$1" '[(.result.snapshot.workspaces[] | select(.workspace_id == $id)),
+    (.result.snapshot.panes[] | select(.pane_id == $id))][0].tokens // {}'
+}
+$H tab create --workspace "$WS" --no-focus >/dev/null; sleep 2  # any hook sends the counts
+[ "$(tokens "$WS" | jq -r '.earmark_archived // 0')" -ge 1 ] && ok "Alpha shows its archived count: $(tokens "$WS")" \
+  || bad "Alpha's tokens: $(tokens "$WS")"
+echo "{\"statusLine\": {\"type\": \"command\", \"command\": \"python3 $ROOT/earmark.py statusline\"}}" > "$DIR/statusline.json"
+P8=$(claude_tab "$WS" --settings "$DIR/statusline.json"); wait_session "$P8" >/dev/null || bad "no session for the agent line"
+prompt "$P8" || bad "Claude didn't answer"
+T8=$(tokens "$P8")
+[ -n "$(echo "$T8" | jq -r '.earmark_model // empty')" ] && ok "the agent line: $T8" || bad "no model on the agent line: $T8"
+[ "$(echo "$T8" | jq '[to_entries[] | select(.key | startswith("earmark_ctx_"))] | length')" = 1 ] \
+  && ok "one context level" || bad "context tokens: $T8"
+# rows --apply does what write_herdr_config says. Only where Earmark has no
+# settings yet (an isolated HOME): never the user's own settings.
+CONF="$HOME/.config/herdr/plugins/config/io.github.cwilliams5.earmark/config.toml"
+if [ -e "$CONF" ]; then
+  say "(Earmark has settings in this HOME: rows --apply not tried; run in an isolated HOME)"
+else
+  python3 "$ROOT/earmark.py" rows --apply >/dev/null 2>&1 && bad "rows --apply wrote with write_herdr_config off" \
+    || { grep -q ">>> earmark" "$HOME/.config/herdr/config.toml" 2>/dev/null \
+         && bad "rows --apply wrote with write_herdr_config off" || ok "rows --apply writes nothing with the setting off"; }
+  mkdir -p "$(dirname "$CONF")"; printf '[sidebar]\nwrite_herdr_config = true\n' > "$CONF"
+  python3 "$ROOT/earmark.py" rows --apply >/dev/null && grep -q ">>> earmark" "$HOME/.config/herdr/config.toml" \
+    && herdr config check >/dev/null 2>&1 && ok "with it on, the rows block is in Herdr's config and it checks out" \
+    || bad "rows --apply with write_herdr_config on"
+  rm -f "$CONF"
+fi
 
 for AG in ${EARMARK_AGENTS:-}; do
   say "7. $AG: close, reopen through Earmark, close again"

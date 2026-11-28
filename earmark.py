@@ -12,6 +12,32 @@ Herdr runs this with a subcommand from herdr-plugin.toml:
     hook     every event hook and the startup hook: keep the notes on live
              panes current and archive what closed
 
+and for workspace notes:
+
+    note-open        the "note" action: the popup on this workspace's note
+    note-popup       the note popup itself (EARMARK_NOTE_WS picks the workspace)
+    note [show [--json] | write [--expect VERSION] | path]
+                     read or replace this workspace's note (the /herdr-note
+                     skill uses it); --workspace W, --session S
+
+and for Herdr's sidebar:
+
+    rows [--apply | --theme-hook]   print the rows to put in Herdr's
+                                    config.toml for Earmark's values;
+                                    --apply puts them there now (between
+                                    Earmark's markers; only with
+                                    write_herdr_config on); --theme-hook makes
+                                    Omarchy recolour them after each theme
+                                    switch
+
+for Claude Code (its statusLine command in settings.json):
+
+    statusline [-- command...]   pass Claude's status-line input to your own
+                                 status line command (its output and exit
+                                 code pass through), and show the model,
+                                 effort and context use on this agent's row
+                                 in Herdr's sidebar
+
 and for Earmark itself:
 
     suspended <session> <pane>   the placeholder in a suspended tab
@@ -26,13 +52,22 @@ and for people:
     list     print the archive (all Herdr sessions and workspaces)
     check    print the settings in effect and where Earmark keeps its files
 
+Outside Herdr (Claude Code's status line, the /herdr-note skill, Omarchy's
+theme hook) it's run through the launcher Earmark keeps in its config folder
+(earmark/launcher.py), never from where Herdr installed it.
+
 Python standard library only (CLAUDE.md, rule 1).
 """
 import json
 import os
 import sys
 
-from earmark import PLUGIN_ID, VERSION, config, core, herdr, store
+if __name__ == "__main__" and sys.argv[1:2] == ["statusline"]:
+    # The user's own status line goes out before the rest of Earmark loads.
+    from earmark import statusline
+    sys.exit(statusline.run(sys.argv[2:]))
+
+from earmark import PLUGIN_ID, VERSION, config, core, herdr, store  # noqa: E402
 
 
 def _json_env(name):
@@ -144,7 +179,9 @@ def cmd_check():
     if cfg["suspend"]["messages"] == "toast" and herdr.toasts_on() is False:
         print(f"  messages = \"toast\", but Herdr's toasts are off ([ui.toast] delivery in {herdr.config_path()}),"
               " so the suspend key answers in its popup.")
-    for key in ("keep_days", "report_count", "title_first", "debug_log"):
+    for key, why in config.retired():
+        print(f"  {key}: no longer used ({why}); you can remove it")
+    for key in ("keep_days", "title_first", "debug_log"):
         if key == "keep_days" and cfg[key] is None:
             print(f"  keep_days unset: as long as the agent keeps a session; "
                   f"{config.FALLBACK_DAYS} days where Earmark can't check")
@@ -154,6 +191,29 @@ def cmd_check():
         print(f"  resume.{agent} = {argv!r}")
     for key, value in cfg["suspend"].items():
         print(f"  suspend.{key} = {value!r}")
+    for key, value in cfg["sidebar"].items():
+        print(f"  sidebar.{key} = {value!r}")
+    for key, value in cfg["colors"].items():
+        print(f"  colors.{key} = {value!r}")
+    for key, value in cfg["notes"].items():
+        print(f"  notes.{key} = {value!r}")
+    mismatch = config.context_mismatch(config._read()[0] or {})
+    if mismatch:
+        print(f"  note: {mismatch}")
+    from earmark import herdrconf
+    try:
+        with open(herdr.config_path(), encoding="utf-8") as f:
+            has_block = herdrconf.BEGIN in f.read()
+    except OSError:
+        has_block = False
+    print(f"  Herdr's config.toml: {'has' if has_block else 'no'} Earmark rows"
+          f"{'' if has_block or cfg['sidebar']['write_herdr_config'] else ' (earmark rows prints them)'}; "
+          f"theme hook {'on' if os.path.exists(herdrconf.theme_hook_path()) else 'off'}")
+    last = store.load_json("herdrconf.json").get("last")
+    if cfg["sidebar"]["write_herdr_config"] and isinstance(last, dict) and last.get("status") not in ("written", "unchanged"):
+        print(f"    last write: {last.get('status')}: {last.get('detail')}")
+    from earmark import launcher
+    print(f"  launcher: {launcher.path()}{'' if os.path.exists(launcher.path()) else ' (written at the next Herdr event)'}")
     if cfg["suspend"]["when"] == "memory":
         from earmark import procs
         available = procs.available_percent()
@@ -166,7 +226,56 @@ def cmd_check():
           f"{len(archive.get('workspaces', {}))} closed workspaces, {suspended} suspended tabs")
 
 
-COMMANDS = {"open": cmd_open, "open-workspaces": cmd_open_workspaces, "popup": cmd_popup, "suspend": cmd_suspend,
+def cmd_note():
+    from earmark import notes
+    return notes.cli(sys.argv[2:])
+
+
+def cmd_note_open():
+    wid = os.environ.get("HERDR_WORKSPACE_ID") or (_json_env("HERDR_PLUGIN_CONTEXT_JSON") or {}).get("workspace_id")
+    if not wid:
+        print("earmark: no workspace to show the note of", file=sys.stderr)
+        return 2
+    herdr.run("plugin", "pane", "open", "--plugin", PLUGIN_ID, "--entrypoint", "note",
+              "--env", f"EARMARK_NOTE_WS={wid}")
+    return 0
+
+
+def cmd_note_popup():
+    from earmark import noteui
+    ctx = _json_env("HERDR_PLUGIN_CONTEXT_JSON") or {}
+    wid = os.environ.get("EARMARK_NOTE_WS") or ctx.get("workspace_id") or os.environ.get("HERDR_WORKSPACE_ID")
+    if not wid:
+        return 2
+    noteui.main(herdr.session_name(), wid, ctx.get("workspace_label") or "")
+    return 0
+
+
+def cmd_rows():
+    from earmark import herdrconf
+    args = sys.argv[2:]
+    cfg = config.load()
+    palette = herdrconf.theme_palette() if herdrconf.theme_stamp() else {}
+    if "--theme-hook" in args:
+        hook = herdrconf.install_theme_hook()
+        print(f"Omarchy now runs {hook} after each theme switch." if hook else
+              "No Omarchy here (~/.config/omarchy): nothing to hook. Earmark recolours at its next Herdr event.")
+        return 0 if hook else 1
+    if "--apply" in args:
+        status, detail = herdrconf.keep_current(cfg, now=True)
+        print(f"{status}: {detail}" if detail else status)
+        return 0 if status in ("written", "unchanged") else 1
+    text = herdrconf.block(cfg, palette)
+    if not text:
+        print("# Nothing to show: [sidebar] counts and agent_row are both empty.")
+        return 0
+    print(f"# For {herdr.config_path()} (then: herdr server reload-config).")
+    print("# Or set write_herdr_config = true in Earmark's [sidebar] and Earmark keeps it there itself.")
+    print(text, end="")
+    return 0
+
+
+COMMANDS = {"note": cmd_note, "note-open": cmd_note_open, "note-popup": cmd_note_popup, "rows": cmd_rows, "open": cmd_open, "open-workspaces": cmd_open_workspaces, "popup": cmd_popup, "suspend": cmd_suspend,
             "message": cmd_message,
             "suspended": cmd_suspended, "worker": cmd_worker, "hook": cmd_hook, "list": cmd_list, "check": cmd_check}
 
@@ -175,8 +284,8 @@ def main(argv):
     if len(argv) < 2 or argv[1] not in COMMANDS:
         print(f"usage: earmark.py {{{'|'.join(COMMANDS)}}}", file=sys.stderr)
         return 2
-    COMMANDS[argv[1]]()
-    return 0
+    result = COMMANDS[argv[1]]()
+    return result if isinstance(result, int) else 0
 
 
 if __name__ == "__main__":

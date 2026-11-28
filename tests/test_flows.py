@@ -448,7 +448,7 @@ class SuiteSandboxTests(unittest.TestCase):
     def test_the_default_claude_folder_is_the_suites_own(self):  # review 8 R159
         import tempfile
         self.assertTrue(agents._claude_dir("").startswith(tempfile.gettempdir()))
-        self.assertTrue(os.path.expanduser("~").startswith(tempfile.gettempdir()))
+        self.assertEqual(os.path.expanduser("~"), os.path.join(_isolate.ROOT, "home"))  # the suite's own, exactly
 
 
 class UnknownFolderTests(StateDir):

@@ -32,6 +32,8 @@ ROOT = tempfile.mkdtemp(prefix="earmark-tests-")
 atexit.register(shutil.rmtree, ROOT, True)
 os.environ.pop("HERDR_SOCKET_PATH", None)
 os.environ.pop("HERDR_SESSION", None)
+for _name in ("HERDR_PANE_ID", "HERDR_TAB_ID", "HERDR_WORKSPACE_ID", "HERDR_ENV"):  # the pane running the tests
+    os.environ.pop(_name, None)
 os.environ["HERDR_BIN_PATH"] = "/nonexistent/herdr-blocked-in-tests"
 for name in ("HERDR_PLUGIN_STATE_DIR", "HERDR_PLUGIN_CONFIG_DIR", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "GROK_HOME"):
     path = os.path.join(ROOT, name.lower())

@@ -1,8 +1,39 @@
 # How the README media were made
 
-`media/hero.png`, `workspaces.png`, `reopen.gif` and `restore.gif` come from
-a staged demo, never from the maintainer's real Herdr session. Re-shoot them
-when the popup's look changes.
+Every image comes from a staged demo, never from the maintainer's real Herdr
+session. Re-shoot them when the popup's or the sidebar's look changes.
+
+## 1.2: `hero.png`, `sidebar.png`, `notes.gif`, `suspended.png`
+
+1. `stage-1.2.sh`: a named demo session (`earmark-demo`) with its own copy of
+   your Herdr config (the hostname taken out of the tab bar, `sidebar_width =
+   30` so an agent line shows in full), workspaces `web`, `docs` and `api`
+   over `/tmp/demo`, each folder with a project `.claude/settings.json` whose
+   status line is Earmark's launcher alone (`statusline`, no command of your
+   own: it hides a personal status line and still sends the agent lines).
+2. `agents-1.2.sh web|docs|api` (run the three at once): real Claude Code,
+   Codex and Grok exchanges with prompts that say not to edit anything; some
+   tabs are closed afterwards for the archive. `docs/outline` runs Claude in
+   auto mode, so it can write the note without a permission prompt.
+3. Staging by hand: a Claude asked a question with its AskUserQuestion tool
+   waits on you (the red "needs input" count; a request to edit a file
+   doesn't, in auto mode); `touch -d` two archived Claude transcripts for
+   believable ages (3 hours, yesterday).
+4. `SHOOT_DIR=<scratch> shoot-1.2.sh`: suspends `api/errors` with Earmark's
+   own key action, sets one agent working, stages two context percentages
+   (88% and 71%, through Earmark's own `agentrow.update`; short demo chats
+   never fill a context window), shoots the sidebar and the archive over it,
+   then opens the note popup on an empty note, asks `docs/outline` to write it
+   (`noteui.ask`, what `u` does) and shoots while the note fills in. Herdr's
+   toasts show in some frames; pick frames without them.
+5. `social-preview.png`: the go-public skill's `social-preview.sh` on the new
+   hero padded to 3:2 with the terminal's background (`magick -extent
+   1968x1312`), so the card's frame cuts nothing.
+6. Cropped 16 px on each side (the window's border glow), captioned with the
+   go-public skill's `caption.sh`, GIF with `gif.sh` (3 frames, 2.2 s, 1000 px).
+   Every colour was checked against the theme's with a pixel sample.
+
+## 1.0: `hero-1.0.png`, `workspaces.png`, `reopen.gif`, `restore.gif`
 
 1. **A named demo session with its own config.** Copy your Herdr config to
    `/tmp/earmark-demo/herdr-config.toml`, drop anything personal from it

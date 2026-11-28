@@ -12,8 +12,10 @@ renamed over the old one.
 """
 import contextlib
 import fcntl
+import hashlib
 import json
 import os
+import re
 import tempfile
 import time
 
@@ -36,14 +38,58 @@ def state_dir():
 
 
 @contextlib.contextmanager
-def locked():
-    fd = os.open(os.path.join(state_dir(), ".lock"), os.O_RDWR | os.O_CREAT, 0o600)
+def flock(path, timeout=None):
+    """An exclusive lock on the file at `path` (created, mode 0600). With a
+    `timeout`, TimeoutError after that many seconds of someone else holding
+    it, rather than waiting for ever."""
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
     with os.fdopen(fd, "r+") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
+        if timeout is None:
+            fcntl.flock(f, fcntl.LOCK_EX)
+        else:
+            deadline = time.monotonic() + timeout
+            while True:
+                try:
+                    fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError(f"{path} is held by another process")
+                    time.sleep(0.02)
         try:
             yield
         finally:
             fcntl.flock(f, fcntl.LOCK_UN)
+
+
+def locked():
+    return flock(os.path.join(state_dir(), ".lock"))
+
+
+def write_atomic(path, text, mode=0o600, sync=True):
+    """Replace the file at `path` with `text` all at once: written to a temp
+    file in the same folder, flushed (and synced to disk unless `sync` is
+    False: caches only), given `mode`, then renamed over the old one."""
+    fd, tmp = tempfile.mkstemp(prefix="." + os.path.basename(path) + ".", dir=os.path.dirname(path) or ".")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            if sync:
+                os.fsync(f.fileno())
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
+def segment(text):
+    """A file name for a session, workspace or pane id: itself when plain,
+    else a hash (ids come from Herdr and from the environment)."""
+    return text if re.fullmatch(r"[A-Za-z0-9:_.-]{1,64}", text or "") and text not in (".", "..") else \
+        hashlib.sha256((text or "").encode()).hexdigest()[:24]
 
 
 @contextlib.contextmanager
@@ -101,26 +147,17 @@ def _load(name, empty):
         return empty
 
 
-def _save(name, data):
-    directory = state_dir()
-    fd, tmp = tempfile.mkstemp(prefix=f".{name}.", dir=directory)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=1, sort_keys=True)
-            f.write("\n")
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, os.path.join(directory, name))
-    except BaseException:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp)
-        raise
+def _save(name, data, sync=True):
+    """Atomically replace a file; `sync` flushes it to disk first (left
+    out only for caches, which a crash may lose: sidebar.json)."""
+    write_atomic(os.path.join(state_dir(), name), json.dumps(data, ensure_ascii=False, indent=1, sort_keys=True) + "\n",
+                 sync=sync)
 
 
 def session_state(index, session):
     """One Herdr session's part of index.json, created empty if new."""
     return index.setdefault("sessions", {}).setdefault(
-        session, {"panes": {}, "workspaces": {}, "boot": 0, "boot_panes": [], "reported": {}})
+        session, {"panes": {}, "workspaces": {}, "boot": 0, "boot_panes": []})
 
 
 def load_index():
@@ -152,6 +189,20 @@ def load_archive():
 
 def save_archive(data):
     _save("archive.json", data)
+
+
+def load_sidebar():
+    """sidebar.json: the tokens last sent to Herdr's sidebar, per Herdr
+    session, so only changes are sent. A cache: lost, everything is sent
+    again; kept out of index.json so a status change doesn't rewrite that."""
+    data = _load("sidebar.json", {"sessions": {}})
+    if not isinstance(data.get("sessions"), dict):
+        data["sessions"] = {}
+    return data
+
+
+def save_sidebar(data):
+    _save("sidebar.json", data, sync=False)
 
 
 def debug_log(record):

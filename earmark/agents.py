@@ -127,7 +127,10 @@ def claude_transcript(session_id, config_dir=None):
     return max(hits, key=os.path.getmtime) if hits else None
 
 
-_COMMAND_NOISE = ("<local-command", "<command-name>", "<command-message>", "<command-args>")
+# User records Claude Code writes that the user didn't type: slash-command
+# echoes, background-task and subagent results, `!` shell input and output.
+_COMMAND_NOISE = ("<local-command", "<command-name>", "<command-message>", "<command-args>", "<task-notification",
+                  "<bash-input", "<bash-stdout", "<bash-stderr", "<system-reminder", "<user-prompt-submit-hook")
 
 
 def _real_prompt(record):
@@ -144,6 +147,135 @@ def _real_prompt(record):
     if not content or content.startswith(_COMMAND_NOISE):
         return None
     return content
+
+
+def tail_records(path, tail_bytes=1048576):
+    """JSON-line records at the end of a file, last first."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - tail_bytes))
+            data = f.read()
+    except OSError:
+        return
+    lines = data.split(b"\n")
+    if size > tail_bytes:
+        lines = lines[1:]  # the first line was cut
+    for raw in reversed(lines):
+        try:
+            record = json.loads(raw)
+        except ValueError:
+            continue
+        if isinstance(record, dict):
+            yield record
+
+
+REQUESTS, REPLIES = 3, 3  # the last few of each, for a note's line on a tab
+REQUEST_CHARS, REPLY_CHARS = 600, 1500
+SCAN_LIMIT = 64 << 20  # bytes read back for them at most (a user's message can sit megabytes back)
+
+
+def _lines_back(path, chunk=4 << 20):
+    """A file's lines, last first, read backwards a chunk at a time, up to
+    SCAN_LIMIT bytes."""
+    try:
+        f = open(path, "rb")
+    except OSError:
+        return
+    with f:
+        f.seek(0, os.SEEK_END)
+        pos, rest, read = f.tell(), b"", 0
+        while pos > 0 and read < SCAN_LIMIT:
+            step = min(chunk, pos)
+            pos -= step
+            read += step
+            f.seek(pos)
+            lines = (f.read(step) + rest).split(b"\n")
+            rest = lines[0]  # may be the end of a line that starts in the chunk before
+            yield from reversed(lines[1:])
+        if pos == 0 and rest:
+            yield rest
+
+
+def _start(text, n):
+    text = " ".join(str(text).split())
+    return text if len(text) <= n else text[:n - 1].rstrip() + "…"
+
+
+def _reply(text, n=REPLY_CHARS):
+    """A reply in words, without a closing list of sources, its start and
+    its end kept (where an agent says what it did and where things stand)."""
+    text = str(text)
+    cut = text.rfind("Sources:")
+    if cut > len(text) * 0.4:
+        text = text[:cut]
+    text = " ".join(text.split())
+    if len(text) <= n:
+        return text
+    head = n * 4 // 15
+    return text[:head].rstrip() + " … " + text[-(n - head - 3):].lstrip()
+
+
+def _claude_record(line):
+    """A transcript line worth parsing for recent_exchange (cheap test first:
+    tool results are most of a transcript's bytes)."""
+    if b'"type":"assistant"' in line or b'"type": "assistant"' in line:
+        return True
+    return (b'"type":"user"' in line or b'"type": "user"' in line) and b'"tool_result"' not in line
+
+
+def recent_exchange(agent, path):
+    """What catching up on a session needs, from its conversation: the
+    user's last few requests (their start), the agent's last few replies in
+    words (start and end), and the names of the tools it used since the last
+    request ("Bash", "Edit"), never what a tool read or returned (web pages,
+    files and command output are where planted instructions would come
+    from), nor the records Claude writes as the user's that the user didn't
+    type (task results, `!` shell output: _COMMAND_NOISE). Oldest first. Claude's transcript and Codex's rollout; other
+    agents give nothing."""
+    requests, replies, tools = [], [], {}
+    for line in _lines_back(path) if agent in ("claude", "codex") and path else ():
+        if agent == "claude" and not _claude_record(line) or agent == "codex" and b'"response_item"' not in line:
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(record, dict):
+            continue
+        said = asked = None
+        used = []
+        if agent == "claude":
+            asked = _real_prompt(record)
+            content = (record.get("message") or {}).get("content") if record.get("type") == "assistant" else None
+            for c in content if isinstance(content, list) else []:
+                if isinstance(c, dict) and c.get("type") == "tool_use" and isinstance(c.get("name"), str):
+                    used.append(c["name"])
+            texts = [c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"] \
+                if isinstance(content, list) else []
+            said = " ".join(t for t in texts if t.strip()) or None
+        else:
+            payload = record.get("payload") if isinstance(record.get("payload"), dict) else {}
+            if payload.get("type") == "message":
+                texts = [c.get("text", "") for c in payload.get("content") or [] if isinstance(c, dict)
+                         and c.get("type") in ("input_text", "output_text")]
+                words = " ".join(t for t in texts if t.strip() and not t.lstrip().startswith("<")) or None
+                asked, said = (words, None) if payload.get("role") == "user" else \
+                    (None, words) if payload.get("role") == "assistant" else (None, None)
+            elif payload.get("type") in ("function_call", "custom_tool_call") and isinstance(payload.get("name"), str):
+                used.append(payload["name"])
+        if not requests:  # since the last request
+            for name in used:
+                tools[name[:40]] = tools.get(name[:40], 0) + 1
+        if asked and len(requests) < REQUESTS and (not requests or requests[-1] != _start(asked, REQUEST_CHARS)):
+            requests.append(_start(asked, REQUEST_CHARS))  # a message sent twice takes one place
+        if said and len(replies) < REPLIES:
+            replies.append(_reply(said))
+        if len(requests) >= REQUESTS and len(replies) >= REPLIES:
+            break
+    return {"requests": requests[::-1], "replies": replies[::-1],
+            "tools": [f"{name} ×{n}" if n > 1 else name for name, n in sorted(tools.items(), key=lambda kv: -kv[1])]}
 
 
 def claude_has_content(path, max_lines=5000):

@@ -255,15 +255,11 @@ class RoundTripTests(unittest.TestCase):
         core.apply(self.index, self.archive, "default", snap([]), "startup", {}, T0 + 100)
         self.assertIn("w1:t1", s["marked"])
 
-    def test_counts_go_quiet_when_turned_off_and_forget_gone_workspaces(self):
-        with mock.patch.object(config, "load", return_value=dict(config.DEFAULTS, report_count=False)), \
-                mock.patch.object(herdr, "snapshot") as snapshot_, mock.patch.object(core, "send_reports") as send:
-            core.update_counts("default")
-        snapshot_.assert_not_called()
-        send.assert_not_called()
-        self.index["sessions"]["default"] = {"reported": {"w1": "", "w9": "2 archived"}}
-        core.pending_reports(self.index, self.archive, "default", snap([], {"w1": "Work"}))
-        self.assertNotIn("w9", self.index["sessions"]["default"]["reported"])
+    def test_counts_forget_gone_workspaces(self):
+        self.index["sessions"]["default"] = {"boot": 5}
+        cache = {"sessions": {"default": {"boot": 5, "spaces": {"w1": {}, "w9": {"earmark_archived": "2"}}}}}
+        core.pending_reports(self.index, self.archive, "default", snap([], {"w1": "Work"}), None, cache)
+        self.assertNotIn("w9", cache["sessions"]["default"]["spaces"])
 
 
 # ------------------------------------------------ the parking rule's inputs

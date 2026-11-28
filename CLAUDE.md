@@ -8,21 +8,29 @@ name, logo and palette). The reasons below matter as much as the rules.
 This file becomes public with the repo: no personal details, nothing about
 Cody's work setup.
 
-## Status (2026-11-26)
+## Status (2026-11-27)
 
 Public (cwilliams5/herdr-earmark), MIT, listed in Herdr's marketplace
 through the `herdr-plugin` topic. 1.0.0 released 2026-11-21; 1.1.0 released
 2026-11-26: suspend tabs in place (docs/PLAN.md phase I) and
 CLAUDE_CONFIG_DIR read from each Claude process (phase J), after eight
-strict-review rounds. Live on the maintainer's Herdr from this clone
-(linked). Tests: 679 unit tests (Python 3.14; the syntax is checked for
-3.9); `tests/mutate.py` plants the 970 one-line regressions in
-`tests/mutations.md` (our own, plus the independent sets of the round 2-8
-reviewers, no duplicates; all caught after round 8's fixes), refusing a
+strict-review rounds. 1.2.0 is built (docs/PLAN.md phases K-M): one-call
+snapshot (K), workspace notes and the /herdr-note skill (L), coloured agent
+lines and workspace counts in Herdr's sidebar (M). It is merged into the
+local `main` and live on the maintainer's Herdr from this clone (linked),
+but NOT pushed: `main` on GitHub stays at 1.1.0 until phase N is done (the
+full regression run, one strict-review loop over all of 1.2, README media,
+then the release, squashed into one commit like 1.1); its strict-review loop
+(rounds 9 and 10) is done. Tests: 857 unit tests
+(Python 3.14; the syntax is checked for 3.9); `tests/mutate.py` plants the
+1,142 one-line regressions in `tests/mutations.md` (our own, plus the
+independent sets of the round 2-10 reviewers; all caught 2026-11-27), each
+suite run in a scratch HOME of its own, refusing a
 mutant that doesn't compile; `--shard i/n` runs it in
 parallel (6 shards, ~35 min; wait on their PIDs, never a pgrep of their
 command). Numbers from re-planting our own list flatter us, so each review
-round brings fresh ones. `tests/live_check.sh` 18/18 (run in an isolated
+round brings fresh ones. `tests/live_check.sh` 25/25 with Claude Code
+(2026-11-26; Codex and Grok still to run for 1.2; run in an isolated
 HOME, see "Working on it"). Later: a right-click menu entry (if
 Herdr ever allows it), facts for Pi, Copilot and the other agents, dropping
 the Codex `--no-daemon` workaround once herdrdev/herdr#4649 is fixed.
@@ -61,13 +69,28 @@ resume"; Enter replaces the placeholder with the agent's resume command in
 the same pane. Modes: off (shipped default), manual (the key), time, memory,
 count. Like a browser's sleeping tabs.
 
-Decided so far (details in `docs/PLAN.md`):
+Notes (1.2): one Markdown note per workspace, in a popup (read view, `e`
+edits in the user's editor, `u` asks an idle Claude in the workspace to run
+the /herdr-note skill, which ships in `skills/herdr-note/`). Sidebar (1.2):
+model · effort · context % on each agent's second line (Claude through its
+status line, Codex and Grok from their files) and per-state counts on each
+workspace's row, coloured by Earmark's settings (hex or the Omarchy theme's
+colours), fitted to the sidebar by Earmark. Outside Herdr (Claude's status
+line, the skill, Omarchy's theme hook) everything goes through a launcher
+Earmark keeps in its config dir (earmark/launcher.py), never the install
+folder, which Herdr replaces at every update.
+
+Decided so far (the details and history: `git show v1.1.0:docs/PLAN.md`):
 - **No right-click menu entry.** Herdr 0.9.5 has no documented way for a
   plugin to add items to its context menus (plugin UI is terminal panes and
   popups). Retest when Herdr changes; add one if it becomes possible.
-- **The sidebar count is opt-in.** Earmark can report a workspace metadata
-  token (`$earmark`, e.g. "3 archived"); it only shows if the user adds the
-  token to their sidebar rows, and a setting turns the reporting off.
+- **The sidebar info is opt-in (1.2).** Earmark always reports its
+  metadata tokens (workspace counts, agent lines); they only show where the
+  user's Herdr sidebar rows use them, either pasted from `earmark.py rows`
+  or written by Earmark into Herdr's config.toml when `write_herdr_config`
+  is on (off by default). 1.1's `$earmark` ("3 archived") and
+  `report_count` are retired, no compatibility shim; an old config's
+  `report_count` is ignored, never an error.
 - **Suspend is in place and opt-in.** The tab keeps its place and name
   (plus a 💤 mark, display only); nothing moves to a list. The parking
   rule, in every automatic mode: never an agent that's working, blocked,
@@ -127,16 +150,23 @@ Decided so far (details in `docs/PLAN.md`):
 - Ids:
   - Herdr plugin id `io.github.cwilliams5.earmark`
   - actions `open` (key binding target `io.github.cwilliams5.earmark.open`,
-    for example `prefix+a`), `open-workspaces` (for example `prefix+shift+a`)
-    and `suspend` (for example `prefix+ctrl+s`; `prefix+s` is Herdr's settings)
+    for example `prefix+a`), `open-workspaces` (for example
+    `prefix+shift+a`), `suspend` (for example `prefix+ctrl+s`; `prefix+s` is Herdr's settings)
+    and `note` (for example `prefix+i`)
   - settings: `config.toml` in the plugin's config dir
-    (`HERDR_PLUGIN_CONFIG_DIR`, see `herdr plugin config-dir <id>`)
+    (`HERDR_PLUGIN_CONFIG_DIR`, see `herdr plugin config-dir <id>`); the
+    launcher `earmark` and the skill's copy `skills/herdr-note/` live there
+    too (updates and uninstalls leave that folder alone)
   - archive: `archive.json` in the plugin's state dir
     (`HERDR_PLUGIN_STATE_DIR`); suspended records in `index.json`
     (`sessions.<name>.suspended.<pane>`), screen copies in `screens/`,
     Claude timer read offsets in `timers-<hash of the session>.json`, the worker's log in
-    `worker.log`
-  - workspace metadata token `$earmark`
+    `worker.log`; 1.2: notes in `notes/<session>/<workspace>.md`, sent
+    workspace tokens in `sidebar.json`, agent lines in
+    `rows/<session>/<pane>.json`
+  - metadata tokens `$earmark_blocked`, `_working`, `_done`, `_suspended`,
+    `_archived`, `_note` (workspaces); `$earmark_model`, `$earmark_effort`,
+    `$earmark_ctx_1..5` (agent panes)
   - log prefix `earmark:`
 - Branding: `branding/` (`python3 branding/build.py` regenerates it). See
   BRANDING.md for words to avoid in later renames.
@@ -165,6 +195,17 @@ earmark/
   text.py           text helpers shared by the popup and the placeholder
   procs.py          process table, start times, one environment variable,
                     memory (Linux /proc, `ps` elsewhere)
+  sidebar.py        the sidebar's width (copied from Herdr's client), count
+                    and agent-line fitting, token building and sending
+  agentrow.py       agent lines: Claude's from the status line, Codex and
+                    Grok readers, the hooks' refit/resend/clear (rows/)
+  statusline.py     Claude's status line: the user's command first, then
+                    Earmark's part in a process of its own
+  launcher.py       the launcher and skill copy in the config dir
+  herdrconf.py      the rows block for Herdr's config.toml, the opt-in
+                    guarded writer, theme colours, the theme-set hook
+  notes.py          workspace notes: files, versions, the `note` CLI
+  noteui.py         the note popup (read view, editor, ask Claude)
 tests/
   _isolate.py       imported first by every test file: no real Herdr
                     (HERDR_BIN_PATH points nowhere), temp state, settings
@@ -174,6 +215,9 @@ tests/
   test_suspend.py   suspend and CLAUDE_CONFIG_DIR (phases I, J)
   test_review1.py   strict review 1 (R1-R26) and its mutation survivors
   test_review2.py   strict review 2 (R27-R52) and both reviewers' survivors
+  test_sidebar.py, test_agentrow.py, test_herdrconf.py, test_notes.py   1.2
+  test_review9.py   strict review 9 (R168-R193) and its reviewers' survivors:
+                    hooks end to end, the note popup driven, the launcher
   test_review3.py   strict reviews 3-6 (R53-R134) and their reviewers' survivors
   test_flows.py     behaviour tests over whole sequences through the real
                     code (a placeholder started, lost and back; what a hook
@@ -189,10 +233,13 @@ tests/
                     as a failure
   live_check.sh     end-to-end against a throwaway named Herdr session
 branding/           logo system (build.py), the pick in eartag/, alternatives/
-media/              README images: hero.png, workspaces.png, reopen.gif,
-                    restore.gif, social-preview.png; shoot/ has the
+media/              README images: hero.png (1.2), notes.gif, sidebar.png,
+                    suspended.png, workspaces.png, reopen.gif, restore.gif,
+                    hero-1.0.png (the old one), social-preview.png; shoot/ has the
                     scripts and the method (staged demo session)
-docs/PLAN.md        the development plan and log
+skills/herdr-note/  the /herdr-note Claude skill (users link it into ~/.claude/skills)
+docs/PLAN.md        what's left, and the limits reviews found and we accepted
+                    (the history is in git: v1.1.0's copy has phases A-J)
 ```
 
 ## Rules that must not be broken (and why)
@@ -212,8 +259,9 @@ docs/PLAN.md        the development plan and log
 
 - **Notes, not events.** Herdr's close events carry only ids, so every hook
   (`pane.focused`, `pane.agent_detected`, `pane.agent_status_changed`,
-  closes, renames, startup) takes a snapshot (`pane list`, `workspace
-  list`, `tab list`) under a lock and compares it with `index.json`:
+  closes, renames, startup) takes a snapshot (one `herdr api snapshot`:
+  panes, workspaces, tabs at one moment) under a lock and compares it with
+  `index.json`:
   - a noted agent pane that's gone was closed: archive it;
   - a noted pane whose agent was `released` was exited: archive it, unless
     it existed at the startup hook less than `BOOT_GRACE` (60 s) ago (a
@@ -287,13 +335,40 @@ docs/PLAN.md        the development plan and log
   Notes carry `since`,
   `focused_at`, `status_at` (the idle clock) and `config_dir` between
   snapshots (core.CARRY).
-- **Sidebar count:** after a change, `workspace report-metadata <id>
-  --source <plugin id> --token earmark=...` (the id must come first). Shown
-  only if the user adds `$earmark` to `ui.sidebar.spaces.rows`.
+- **Sidebar (1.2):** per workspace, `$earmark_blocked/_working/_done/
+  _suspended/_archived/_note` (bare numbers; zeros and what doesn't fit
+  cleared) with `workspace report-metadata <id> --source <plugin id>`; per
+  agent pane `$earmark_model`, `$earmark_effort` and one of
+  `$earmark_ctx_1..5` (the level picks which, so each has its colour) with
+  `pane report-metadata`. What was sent lives in sidebar.json (workspaces)
+  and rows/<session>/<pane>.json (agents), caches without fsync, so a status
+  change doesn't rewrite index.json. 1.1's `$earmark` is cleared once.
+  A row's tokens go whole whenever one changed (Herdr keeps only the newest
+  report per source and target), and a failed report is sent again.
+  Colours only exist in Herdr's config (herdrconf.py writes or prints the
+  block; it keeps lines Herdr's settings screen put inside the markers,
+  writes through a symlink, backs off when the file changed meanwhile).
+  Claude's values come from `<config dir>/earmark statusline -- <cmd>`, run
+  by Claude Code as its statusLine (statusline.py: the user's output first,
+  Earmark's part forked off); the hooks refit from the cache under its lock,
+  resend after a restart (rows/<session>/.boot vs the index's boot) and
+  clear gone agents. Each hook does the suspend side first, then the
+  sidebar, the config block and the launcher (launcher.ensure).
+- **Notes (1.2):** notes/<session>/<workspace>.md; on a close the text goes
+  into the closed workspace's record and the file is removed after the
+  archive is saved (retire_notes); restore writes it back (put_back). A
+  closed workspace holding a note is never pruned by time; a recreated
+  session's old workspaces are filed as closed at the restart that spots it.
+  `note show --json` gives the skill each agent's last 3 requests, the start
+  and end of its last 3 replies and its tools' names (agents.recent_exchange:
+  never tool output, nor the user records Claude writes for task results and
+  `!` shell output), and the transcript path only with `[notes]
+  read_transcripts`. The popup's editor works on a copy, saved back against
+  the version it started from.
 
 ## Platform facts this depends on (re-check after updates)
 
-Herdr 0.9.5 (Omarchy 4.5.0, Claude Code 2.1.330):
+Herdr 0.9.5 (Omarchy 4.5.0, Claude Code 2.1.332):
 
 - **Plugin API v1:** a `herdr-plugin.toml` manifest declares `[[actions]]`,
   `[[events]]` (hooks on named events, payload in
@@ -461,6 +536,84 @@ Herdr 0.9.5 (Omarchy 4.5.0, Claude Code 2.1.330):
     official agent.
   - `pane report-agent-session` from a custom source is accepted but not
     shown as `agent_session`; only an official source (`herdr:claude`) is.
+- **The sidebar's width (1.2, copied from Herdr 0.9.5's client code; drift
+  risk, re-check before every release and after every Herdr update).**
+  Herdr never tells a plugin how wide the sidebar is on screen: the
+  server's layout is its own virtual screen (`api snapshot` layouts are
+  140x42 at x=0 whatever the client shows), and the client draws the
+  sidebar. Earmark fits its sidebar text to the row itself, because
+  Herdr's fitting drops a workspace's name first (every text token is
+  flexible with a 1-column minimum, and on overflow Herdr adds them back
+  from the right: src/ui/sidebar.rs `resolved_token_spans`), so
+  earmark/sidebar.py copies Herdr's math: width = a dragged width, which
+  the client keeps in `$XDG_STATE_HOME/herdr/client-shell/local-<FNV-1a 64
+  of the session's herdr-client.sock path>.json` (`sidebar_width`, set only
+  while dragged; src/client/shell/preferences.rs; session.json's field is
+  always null in 0.9.5), else `[ui] sidebar_width` (26),
+  clamped to `sidebar_min_width`/`sidebar_max_width` (18/36)
+  (src/client/shell/state.rs); minus a divider column and a scrollbar
+  column (always assumed); workspace lines indented 1 then 3, with 2 kept
+  at the right (src/client/shell/sidebar.rs `render_workspace_rows`);
+  agent lines indented 1 then 3 (src/client/shell/agent_sidebar.rs); " · "
+  between text tokens (src/ui/sidebar/tokens.rs). None of it is an
+  official interface: if Herdr changes it, rows get cut again ("Opus 5…")
+  or counts drop earlier than needed. A dragged sidebar refits at the next
+  Herdr event (a tab switch), not at once. Worktree child workspaces are
+  indented more (6/8 columns); the snapshot carries `worktree {repo_key,
+  is_linked_worktree}` (src/api/schema/workspaces.rs), but Earmark doesn't
+  allow for the deeper indent yet (a README known limit). Text is measured
+  close to Herdr's unicode-width (emoji sequences two columns; some Thai and
+  Indic marks, Hangul jamo and emoji newer than Python's Unicode differ: a
+  README known limit).
+- **Sidebar tokens and styles (1.2, Herdr 0.9.5):** metadata token values
+  are plain text (an ESC byte is stripped: tested); at most 16 per report,
+  names `[A-Za-z0-9_-]{1,32}`, optional `ttl_ms` (24 h max) and `seq`. Pane
+  reports also take `display_agent`, a field apart from `agent`. Styles exist
+  only in Herdr's config, per token: `fg` (hex only; palette names
+  rejected), `bold`, `dim`, `rules` (equals/contains/starts_with/gt/lt +
+  hide; numeric ones need a bare number: Herdr's test rejects "90%"). No
+  italic, underline or background. A missing token disappears with its
+  " · "; an empty row disappears. `rows_by_agent` accepts claude, codex and
+  grok (grok through Herdr's agent manifests). `herdr config check` exits 1
+  for any issue in the file, so the writer compares issue lines before and
+  after. `herdr api snapshot` layouts are the server's virtual screen, not
+  the client's.
+- **`herdr agent prompt <pane> <text>`** submits a prompt to an agent and
+  refuses a blocked one (`agent_blocked`), queueing it into a working one;
+  the note popup's `u` uses it, after checking (again right before
+  sending) that the agent is idle and the prompt box on its bottom screen
+  is empty.
+- **Plugin install folders (Herdr 0.9.5):** every GitHub install and update
+  goes into a new `plugins/github-installations/<id>/<pid>-<n>/checkout`,
+  and Herdr deletes the old one after an install or at server start
+  (src/plugin_paths.rs, src/plugin_installations.rs). `herdr plugin
+  config-dir <id>` prints the plugin's config dir, which survives both;
+  there's no state-dir command. Hence the launcher there.
+- **Herdr's own settings screen** (`prefix+s`) edits config.toml line by
+  line (src/config/io.rs `upsert_section_raw`): a new key goes right before
+  the next table header, so after Earmark's BEGIN marker when Earmark's
+  block follows that table; herdrconf keeps such lines, above the block.
+- **CLI routing:** a `herdr` call without `--session` goes to
+  `HERDR_SOCKET_PATH` (in a hook: the hook's own session), so Earmark
+  names every session, `--session default` included (src/session.rs).
+- **Report sequence:** Herdr drops a metadata report older (by `seq`) than
+  the last one from the same source on that pane or workspace, and still
+  answers OK (src/app/api/panes.rs, workspaces.rs).
+- **Workspace ids are reused** (src/workspace.rs): an in-memory counter,
+  seeded after a restart with the highest surviving id + 1. Anything keyed
+  by workspace id must follow `workspace.closed` (notes do).
+- **Claude Code's status line** (2.1.332) gets `model.display_name`,
+  `effort.level` and `context_window.used_percentage` /
+  `context_window_size`, and reruns on model, effort and token changes.
+  Hooks don't carry effort ("absent for session-lifecycle hooks"), and a
+  UserPromptSubmit hook exiting 2 erases the prompt: why Earmark uses the
+  status line, never hooks.
+- **Omarchy themes** (4.5): `~/.local/state/omarchy/current/theme/colors.toml`
+  with semantic names (red, yellow, green, blue, magenta, orange, accent,
+  foreground, dark_foreground, muted...); `omarchy-theme-color --all` prints
+  them resolved with each theme's fallbacks; scripts in
+  `~/.config/omarchy/hooks/theme-set.d/` run (bash) after a theme switch.
+  Omarchy sets Herdr's theme to "terminal".
 - **Herdr workspaces** may share a folder (a common setup),
   so a session's folder can't identify its workspace; the workspace must be
   recorded at close time.
@@ -532,7 +685,8 @@ Herdr 0.9.5 (Omarchy 4.5.0, Claude Code 2.1.330):
 - **Screenshots and screen takeovers** need the maintainer's OK first, and no
   scripted keys or mouse into his desktop: drive Herdr through its CLI and
   socket instead (see `media/shoot/README.md`).
-- `python3 earmark.py list` / `check` show the archive and the settings in
+- `python3 earmark.py list` / `check` (or the launcher: `<config dir>/earmark
+  check`) show the archive and the settings in
   effect; `debug_log = true` in config.toml logs every hook's event to
   `events.jsonl` in the state dir; hook errors are in `herdr plugin log list
   --plugin io.github.cwilliams5.earmark`.
@@ -565,6 +719,14 @@ not at release.
 - Claude Code, Codex and Grok's own session files: read (never written) for
   titles, last activity and whether a session still exists; formats learned
   from the files themselves.
+- 1.2's sidebar and notes learned from Herdr plugins read first (ideas
+  only, no code taken): pdalinis/herdr-disp-model and herdr-ctx-bar (model
+  and context on agent rows; the default sidebar layout), rchougule/
+  herdr-agents-info (one token per colour band), dkbo/herdr-model-badge
+  (wrapping the user's status line), herdr-ctx-bar's guarded config edit
+  (backup, `config check`, rollback), alexarthurs/herdr-notes and
+  cyperx84/herdr-notes (a note per workspace; atomic saves, reload on
+  outside changes, the editor, a CLI).
 - Python's standard library (curses, sqlite3, tomllib where present).
 
 ## Distribution
@@ -588,7 +750,12 @@ updates"):
    unittest discover tests`, then `mise uninstall python@3.9.<x>`), and
    `EARMARK_AGENTS="codex grok" tests/live_check.sh`.
 3. Re-check README claims against the code; re-shoot media if the popup
-   changed (`media/shoot/README.md`).
+   changed (`media/shoot/README.md`). Re-check the sidebar width model
+   (platform facts, "The sidebar's width") against the installed Herdr's
+   source (and where the client keeps a dragged width, and how plugin
+   install folders are laid out: the launcher depends on it), then look at
+   the real sidebar with Earmark's rows, dragged too: text cut by Herdr, or
+   counts dropped while there was room, means it drifted.
 4. A fresh correctness review of the changes for anything substantial.
 5. The go-public skill's privacy scan (`scripts/privacy-scan.sh`) as the
    last step before pushing.
@@ -598,7 +765,8 @@ updates"):
    `herdr-plugin` topic every 30 minutes
    (https://assets.herdr.dev/plugins/index.json). The social preview is
    `media/social-preview.png`, uploaded by hand in the repo's settings.
-8. Afterwards: status here, `docs/PLAN.md`'s log, the maintainer's dotfiles
+8. Afterwards: status here, `docs/PLAN.md` (tick the release, keep it short),
+   the maintainer's dotfiles
    (which mention the version).
 
 ## Voice and conventions

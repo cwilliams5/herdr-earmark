@@ -146,7 +146,7 @@ class Popup:
             attr = curses.A_REVERSE if selected else curses.A_NORMAL
             if self.view == "workspaces":
                 primary = r["label"] or "(unnamed workspace)"
-                secondary = ""
+                secondary = "✎ note" if r.get("note") else ""
                 when = ago(r.get("closed_at"), now)
                 details = [f"{tab_count(r)} · closed {when}", f"{tab_count(r)} · {when}", when]
             else:
@@ -214,7 +214,9 @@ class Popup:
     def draw_footer(self, scr, h, w):
         self.buttons = {}
         if self.confirm:
-            text = (" Forget this closed workspace? Its sessions stay archived.  " if self.view == "workspaces"
+            noted = self.view == "workspaces" and any(r["key"] == self.confirm and r.get("note") for r in self.rows)
+            text = (" Forget this closed workspace and its note? Its sessions stay archived.  " if noted else
+                    " Forget this closed workspace? Its sessions stay archived.  " if self.view == "workspaces"
                     else " Forget this session?  ")
             buttons = len("[ Forget ]") + 2 + len("[ Keep ]") + 2
             text = fit(text, w - 1 - buttons if w - 1 - buttons >= 16 else w - 1)  # the buttons before the words

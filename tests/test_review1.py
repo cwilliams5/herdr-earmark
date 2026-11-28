@@ -679,7 +679,15 @@ with open(os.environ["FAKE_HERDR_LOG"], "a") as f:
     f.write(json.dumps(args) + "\n")
 def out(result):
     print(json.dumps({"id": "x", "result": result}))
-if args[:2] == ["pane", "list"]:
+if args[:2] == ["api", "snapshot"]:
+    out({"type": "session_snapshot", "snapshot": {
+        "panes": [{"pane_id": "w1:p1", "workspace_id": "w1", "tab_id": "w1:t1"}],
+        "workspaces": [{"workspace_id": "w1", "label": "Work"}],
+        "tabs": [{"tab_id": "w1:t1", "label": "a"}],
+        "agents": [], "layouts": [], "focused_pane_id": "w1:p1"}})
+elif args[:2] == ["api", "snapshot-broken"]:
+    out({"type": "session_snapshot", "snapshot": {"panes": "nope"}})
+elif args[:2] == ["pane", "list"]:
     out({"panes": [{"pane_id": "w1:p1", "workspace_id": "w1", "tab_id": "w1:t1"}]})
 elif args[:2] == ["workspace", "list"]:
     out({"workspaces": [{"workspace_id": "w1", "label": "Work"}]})
@@ -722,6 +730,8 @@ class TransportTests(unittest.TestCase):
     def test_snapshot_and_replies(self):
         s = herdr.snapshot()
         self.assertEqual((list(s["panes"]), list(s["workspaces"]), list(s["tabs"])), (["w1:p1"], ["w1"], ["w1:t1"]))
+        self.assertNotIn("focused_pane_id", s)  # nothing reads it
+        self.assertEqual(self.calls(), [["api", "snapshot"]])  # one call, one moment (K1)
         self.assertEqual(herdr.process_info("w1:p1")["foreground_processes"], [{"pid": 1}])  # odd entries dropped
         self.assertEqual(herdr.read_screen("w1:p1"), "line one\nline two\n")  # text, not JSON; CRLF folded
         self.assertEqual(herdr.new_tab("w1", "/nonexistent", "-h"), ("w1:t2", "w1:p2"))
@@ -731,9 +741,20 @@ class TransportTests(unittest.TestCase):
         with self.assertRaises(herdr.HerdrError):
             herdr.pane("w1:p1")  # a failing exit
 
+    def test_a_snapshot_of_another_shape_is_a_herdr_error(self):
+        real = herdr.run
+        with mock.patch.object(herdr, "run", lambda *a, **k: real("api", "snapshot-broken")):
+            with self.assertRaises(herdr.HerdrError):
+                herdr.snapshot()
+
     def test_the_sidebar_token_puts_the_id_first(self):
-        herdr.report_count("w1", "2 archived", 7)
-        self.assertEqual(self.calls()[-1][:4], ["workspace", "report-metadata", "w1", "--source"])
+        from earmark import sidebar
+        sidebar.report("workspace", "w1", {"earmark_done": "2", "earmark_archived": None}, 7)
+        call = self.calls()[-1]
+        self.assertEqual(call[:4], ["workspace", "report-metadata", "w1", "--source"])
+        self.assertIn("earmark_done=2", call)  # one argument: a value can't pass for an option
+        self.assertEqual(call[call.index("--clear-token") + 1], "earmark_archived")
+        self.assertEqual(call[call.index("--seq") + 1], "7")
 
 
 class ProcessFactsTests(unittest.TestCase):

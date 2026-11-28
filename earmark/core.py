@@ -11,7 +11,7 @@ import os
 import sys
 import time
 
-from . import agents, config, herdr, store
+from . import agents, config, herdr, sidebar, store
 
 # After a Herdr server starts, each restored agent pane reports "released"
 # while its resume is deferred (CLAUDE.md, "Restarts"). Within this many
@@ -75,11 +75,15 @@ def handle_event(event, payload, env=None):
                         idle_clock=scfg["when"] in config.AUTO_MODES)
         if event == "startup" and not cfg.get("_broken"):  # a broken config.toml never prunes
             changed |= prune(archive, cfg, t)
-        if cfg["report_count"]:
-            reports = pending_reports(index, archive, session, snap)
-        else:  # turned off: clear what was shown, once
-            sent = index["sessions"][session].pop("reported", None) or {}
-            reports = [(wid, "", time.time_ns()) for wid, text in sent.items() if text]
+        try:
+            cache = store.load_sidebar()
+            cache_before = json.dumps(cache, sort_keys=True)
+            reports = pending_reports(index, archive, session, snap, cfg, cache)
+            if json.dumps(cache, sort_keys=True) != cache_before:
+                store.save_sidebar(cache)
+        except Exception as e:  # the sidebar never at the cost of archiving
+            print(f"earmark: sidebar counts: {e!r}", file=sys.stderr)
+            reports = []
         s = index["sessions"][session]
         # Suspend: placeholders back after a restart; an automatic check at
         # most once a minute; resume on view (earmark/suspend.py).
@@ -127,16 +131,10 @@ def handle_event(event, payload, env=None):
         # session dropped from the index would be in neither file.
         if changed:
             store.save_archive(archive)
+            retire_notes(archive, session, t)
         if json.dumps(index, sort_keys=True) != before:
             store.save_index(index)
-    send_reports(reports)
-    try:
-        from . import suspend as _s
-        s_now = index["sessions"][session]
-        for tab_id, label, mark in _s.stale_marks(snap, s_now.get("suspended") or {}, s_now.get("marked") or {}):
-            _s.unmark_tab(tab_id, label, mark, session=session)
-    except Exception as e:
-        print(f"earmark: tab marks: {e!r}", file=sys.stderr)
+    # Suspend's work first: a resume on view shouldn't wait for the sidebar.
     try:
         if worker_args is not None and not suspend.spawn_worker(worker_args) and "--rearm" in worker_args:
             with store.locked():  # keep the restart's request for the next hook
@@ -147,6 +145,28 @@ def handle_event(event, payload, env=None):
             suspend.wake_on_view(session, wake)
     except Exception as e:
         print(f"earmark: suspend: {e!r}", file=sys.stderr)
+    send_reports(reports, session)
+    try:
+        s_now = index["sessions"][session]
+        for tab_id, label, mark in suspend.stale_marks(snap, s_now.get("suspended") or {}, s_now.get("marked") or {}):
+            suspend.unmark_tab(tab_id, label, mark, session=session)
+    except Exception as e:
+        print(f"earmark: tab marks: {e!r}", file=sys.stderr)
+    try:  # agent rows: refit, resend after a restart, Codex and Grok, clear the gone
+        from . import agentrow
+        agentrow.refresh(session, snap, cfg, index["sessions"][session].get("boot"))
+    except Exception as e:
+        print(f"earmark: agent rows: {e!r}", file=sys.stderr)
+    try:  # opted in: Earmark's rows in Herdr's config.toml, recoloured for the theme
+        from . import herdrconf
+        herdrconf.keep_current(cfg)
+    except Exception as e:
+        print(f"earmark: Herdr's config.toml: {e!r}", file=sys.stderr)
+    try:  # the launcher the status line, the skill and the theme hook go through
+        from . import launcher
+        launcher.ensure()
+    except Exception as e:
+        print(f"earmark: launcher: {e!r}", file=sys.stderr)
 
 
 def note_config_dirs(snap, s):
@@ -238,11 +258,13 @@ def apply(index, archive, session, snap, event, data, t, server_pid=None, idle_c
                 rec = suspended.pop(pid)
                 changed |= archive_note(entries, session, labelled(dict(rec), {}), t, "closed")
                 _drop_screen(rec)
+            # The old workspaces went with them, and their ids start again
+            # too: filed as closed, notes and all, before a new w1 shows one.
+            for wid, layout in list((s.get("layouts") or {}).items()):
+                changed |= record_closed_workspace(archive, session, wid, layout, t)
+            s["layouts"] = {}
         s["boot"], s["boot_panes"] = t, sorted(s["panes"])
         s["boot_grace"] = boot_grace_for(len(s["panes"]) + len(suspended))
-        # Sidebar tokens don't survive a restart: counts are sent again (an
-        # empty workspace needs no clearing).
-        s["reported"] = {wid: "" for wid in snap["workspaces"]}
         if suspended and (server_pid is None or s.get("rearm_pid") != server_pid):
             # The placeholders died with the server: put them back (once per
             # server; its startup hook and its first other hook both see it).
@@ -595,14 +617,33 @@ def record_closed_workspace(archive, session, wid, layout, t):
     if not layout.get("tabs"):
         return False
     key = f"{session}|{wid}|{int(t)}"
-    archive.setdefault("workspaces", {})[key] = {
+    record = archive.setdefault("workspaces", {})[key] = {
         "herdr_session": session,
         "workspace_id": wid,
         "label": layout.get("label") or "",
         "closed_at": t,
         "tabs": layout["tabs"],
     }
+    from . import notes  # its note goes with it (Herdr reuses ids); the file goes once the archive is saved
+    try:
+        text = notes.read(session, wid)
+    except OSError:
+        text = ""
+    if text.strip():
+        record["note"] = text
     return True
+
+
+def retire_notes(archive, session, t):
+    """Note files of workspaces closed at `t`, now that their copies are
+    saved in archive.json."""
+    from . import notes
+    for rec in archive.get("workspaces", {}).values():
+        if rec.get("herdr_session") == session and rec.get("closed_at") == t and rec.get("note"):
+            try:
+                notes.retire(session, rec.get("workspace_id") or "", rec["note"])
+            except OSError as e:
+                print(f"earmark: note of {rec.get('label')}: {e}", file=sys.stderr)
 
 
 def note_started(session, pane_id, tab_id, workspace_id, workspace_label, tab_label, agent, session_id,
@@ -780,6 +821,8 @@ def prune(archive, cfg, t):
     closed = archive.setdefault("workspaces", {})
     for key in list(closed):
         days = cfg["keep_days"] if cfg["keep_days"] is not None else config.FALLBACK_DAYS
+        if closed[key].get("note"):  # the user's own text: kept until they forget the workspace
+            continue
         if days and t - closed[key].get("closed_at", t) > days * 86400:
             del closed[key]
             changed = True
@@ -846,7 +889,8 @@ def closed_workspaces(archive, session):
 
 
 def forget_workspace(key):
-    """Forget a closed workspace's grouping; its sessions stay archived."""
+    """Forget a closed workspace's grouping and its note (the popup says
+    so first); its sessions stay archived."""
     with store.locked():
         archive = store.load_archive()
         if archive.get("workspaces", {}).pop(key, None) is not None:
@@ -906,6 +950,12 @@ def restore_workspace(record, cfg):
                 started.append((pane_id, tab_id, label, tab))
     except herdr.HerdrError as e:
         return str(e)
+    if record.get("note"):  # back before the record goes, so a failure never loses it
+        from . import notes
+        try:
+            notes.put_back(herdr.session_name(), target, record["note"])
+        except OSError as e:
+            return f"the workspace is back, but its note couldn't be written ({e}); it stays in the list"
     with store.locked():
         archive = store.load_archive()
         archive.get("workspaces", {}).pop(record["key"], None)
@@ -920,47 +970,86 @@ def restore_workspace(record, cfg):
 
 # ---------------------------------------------------------------- sidebar
 
-def count_text(n):
-    return f"{n} archived" if n else ""
+def noted_workspaces(session):
+    """Workspace ids with a note (for the sidebar's note mark)."""
+    from . import notes
+    return notes.noted(session)
 
 
-def pending_reports(index, archive, session, snap):
-    """The $earmark sidebar tokens that changed since they were last sent, each
-    with the sequence number Herdr orders them by: taken here, under the
-    lock, so a count worked out later always carries a higher one."""
+def pending_reports(index, archive, session, snap, cfg=None, cache=None):
+    """The sidebar count tokens that changed since they were last sent
+    (`cache`: sidebar.json, updated here), per workspace, each with the
+    sequence number Herdr orders them by: taken here, under the lock, so
+    counts worked out later always carry a higher one. Fitted to the
+    sidebar's width (earmark/sidebar.py). Tokens don't survive a Herdr
+    restart, so a new boot starts from nothing sent."""
+    cfg = cfg or config.load()
+    cache = store.load_sidebar() if cache is None else cache
+    side = cfg["sidebar"]
     s = index["sessions"][session]
-    sent = s.setdefault("reported", {})
+    mine = cache["sessions"].setdefault(session, {})
+    if mine.get("boot") != s.get("boot"):
+        mine.clear()
+        mine["boot"] = s.get("boot")
+    sent = mine.setdefault("spaces", {})
+    for wid, text in (s.pop("reported", None) or {}).items():  # 1.1's "N archived", cleared once
+        if isinstance(text, str) and text and not isinstance(sent.get(wid), dict):
+            sent[wid] = text
+    width = sidebar.sidebar_width(session)
+    suspended = {}
+    for pid in s.get("suspended") or {}:
+        wid = (snap["panes"].get(pid) or {}).get("workspace_id") or pid.split(":")[0]
+        suspended[wid] = suspended.get(wid, 0) + 1
+    noted = noted_workspaces(session)
     out = []
     for wid, w in snap["workspaces"].items():
-        text = count_text(len(listing(archive, session, w.get("label") or "")))
-        if sent.get(wid) != text:
-            out.append((wid, text, time.time_ns()))
-            sent[wid] = text
+        label = w.get("label") or ""
+        values = sidebar.count_values(snap, wid, suspended.get(wid, 0), len(listing(archive, session, label)),
+                                      wid in noted)
+        tokens = sidebar.count_tokens(sidebar.fit_counts(label, values, side["counts"], side["counts_line"], width))
+        before = sent.get(wid)
+        delta = sidebar.changed(tokens, before if isinstance(before, dict) else None)
+        if before and not isinstance(before, dict):  # 1.1's "N archived", cleared once
+            delta[sidebar.LEGACY_TOKEN] = None
+        if delta:
+            out.append((wid, delta, time.time_ns()))
+        sent[wid] = tokens
     for wid in [wid for wid in sent if wid not in snap["workspaces"]]:
         del sent[wid]
     return out
 
 
 def update_counts(session):
-    """Resend any $earmark tokens the archive's current state changes."""
+    """Resend any count tokens the archive's current state changes."""
     cfg = config.load()
-    if not cfg["report_count"]:
-        return
     with store.locked():
         try:
             snap = herdr.snapshot()
         except herdr.HerdrError:
             return
-        index, archive = store.load_index(), store.load_archive()
+        index, archive, cache = store.load_index(), store.load_archive(), store.load_sidebar()
         store.session_state(index, session)
-        reports = pending_reports(index, archive, session, snap)
-        store.save_index(index)
-    send_reports(reports)
+        before = json.dumps(index, sort_keys=True)
+        reports = pending_reports(index, archive, session, snap, cfg, cache)
+        store.save_sidebar(cache)
+        if json.dumps(index, sort_keys=True) != before:
+            store.save_index(index)
+    send_reports(reports, session)
 
 
-def send_reports(reports):
-    for wid, text, seq in reports:
+def send_reports(reports, session):
+    failed = []
+    for wid, tokens, seq in reports:
         try:
-            herdr.report_count(wid, text, seq)
+            sidebar.report("workspace", wid, tokens, seq)
         except herdr.HerdrError as e:
-            print(f"earmark: sidebar count for {wid}: {e}", file=sys.stderr)  # shows in `herdr plugin log`
+            print(f"earmark: sidebar counts for {wid}: {e}", file=sys.stderr)  # shows in `herdr plugin log`
+            failed.append(wid)
+    if failed:  # not shown: the next hook doesn't know what is, so it sends them whole
+        with store.locked():
+            cache = store.load_sidebar()
+            spaces = (cache["sessions"].get(session) or {}).get("spaces") or {}
+            for wid in failed:
+                if wid in spaces:
+                    spaces[wid] = {}
+            store.save_sidebar(cache)

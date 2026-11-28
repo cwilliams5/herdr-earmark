@@ -3,7 +3,7 @@
 
 id = "io.github.cwilliams5.earmark"
 name = "Earmark"
-version = "1.1.0"
+version = "1.2.0"
 min_herdr_version = "0.9.5"
 description = "Closed agent sessions, filed under their Herdr workspace and ready to reopen."
 platforms = ["linux", "macos"]
@@ -36,6 +36,21 @@ title = "Suspend or resume this tab"
 description = "End the agent in view to free its memory, keeping the tab; or bring a suspended one back."
 contexts = ["workspace"]
 command = ["python3", "earmark.py", "suspend"]
+
+[[actions]]
+id = "note"
+title = "This workspace's note"
+description = "Read or edit this workspace's note, or ask a Claude session here to update it."
+contexts = ["workspace"]
+command = ["python3", "earmark.py", "note-open"]
+
+[[panes]]
+id = "note"
+title = "Earmark"
+placement = "popup"
+width = "80%"
+height = "70%"
+command = ["python3", "earmark.py", "note-popup"]
 
 [[panes]]
 id = "archive"

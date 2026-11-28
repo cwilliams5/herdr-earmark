@@ -49,7 +49,15 @@ def mutations():
 
 
 def run_suite(cwd):
-    r = subprocess.run([sys.executable, "-m", "unittest", "discover", "tests"], cwd=cwd, env=ENV,
+    # A sandbox of its own around the suite's: a mutant that switches off
+    # tests/_isolate.py (R159's does) must not run the other tests against
+    # the real home (one wrote the maintainer's Omarchy theme hook that way).
+    home = os.path.join(os.path.dirname(cwd), "home")
+    env = dict(ENV, HOME=home, XDG_CONFIG_HOME=os.path.join(home, ".config"),
+               XDG_STATE_HOME=os.path.join(home, ".local", "state"), XDG_DATA_HOME=os.path.join(home, ".local", "share"))
+    for path in (env["XDG_CONFIG_HOME"], env["XDG_STATE_HOME"], env["XDG_DATA_HOME"]):
+        os.makedirs(path, exist_ok=True)
+    r = subprocess.run([sys.executable, "-m", "unittest", "discover", "tests"], cwd=cwd, env=env,
                        capture_output=True, text=True, timeout=120, preexec_fn=_cap_memory)
     failed = re.findall(r"^(?:FAIL|ERROR): (\S+) \(([^)]+)\)", r.stderr, re.M)
     return r.returncode == 0, [f"{cls.split('.')[-2] if cls.count('.') >= 2 else cls}.{test}" for test, cls in failed]

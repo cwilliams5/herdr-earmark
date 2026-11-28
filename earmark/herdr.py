@@ -36,16 +36,18 @@ def session_name(env=None):
 
 
 def snapshot():
-    """Panes, workspaces and tabs as Herdr reports them right now. A reply
-    of another shape is a HerdrError (never a crash halfway through)."""
+    """Panes, workspaces and tabs as Herdr reports them right now, from one
+    `herdr api snapshot` call: one consistent moment (three list calls could
+    straddle a rename or a close). Its panes, workspaces and tabs are the
+    same records `pane list`, `workspace list` and `tab list` return, in the
+    same order. A reply of another shape is a HerdrError (never a crash
+    halfway through)."""
     try:
-        panes = run("pane", "list")["panes"]
-        workspaces = run("workspace", "list")["workspaces"]
-        tabs = run("tab", "list")["tabs"]
+        snap = run("api", "snapshot")["snapshot"]
         return {
-            "panes": {p["pane_id"]: p for p in panes},
-            "workspaces": {w["workspace_id"]: w for w in workspaces},
-            "tabs": {t["tab_id"]: t for t in tabs},
+            "panes": {p["pane_id"]: p for p in snap["panes"]},
+            "workspaces": {w["workspace_id"]: w for w in snap["workspaces"]},
+            "tabs": {t["tab_id"]: t for t in snap["tabs"]},
         }
     except (TypeError, KeyError, AttributeError) as e:
         raise HerdrError(f"Herdr answered in a shape Earmark doesn't know ({e!r})")
@@ -88,17 +90,6 @@ def run_in_pane(pane_id, argv, env=""):
     run("pane", "run", pane_id, env + shlex.join(argv))
 
 
-def report_count(workspace_id, text, seq):
-    """Set or clear the $earmark sidebar token on one workspace. Herdr's CLI
-    takes the workspace id before the options (0.9.5 rejects it last).
-    Herdr ignores a lower seq from the same source, so seq is taken when the
-    count is worked out (under Earmark's lock), not when it's sent."""
-    from . import PLUGIN_ID
-    args = ["workspace", "report-metadata", workspace_id, "--source", PLUGIN_ID, "--seq", str(seq)]
-    args += ["--token", f"earmark={text}"] if text else ["--clear-token", "earmark"]
-    run(*args)
-
-
 def process_info(pane_id):
     """The pane's shell pid, its foreground process group and the processes
     in it (`pane process-info`)."""
@@ -110,14 +101,17 @@ def process_info(pane_id):
     return info
 
 
+RECENT_LINES = 200  # when Herdr didn't say how tall the pane is
+
+
 def read_screen(pane_id, rows=None, timeout=10):
-    """What the pane shows, with its colours (ANSI), from the bottom: the
-    last `rows` lines (the pane's height) of what Herdr keeps. `--source
-    visible` would follow the user's scroll position, and a pane scrolled up
-    shows an old prompt box. `pane read` answers with the text itself, not
-    JSON."""
+    """What the pane shows, with its colours (ANSI), always from the bottom:
+    the last `rows` lines (the pane's height) of what Herdr keeps. Never
+    `--source visible`: it follows the user's scroll position, and a pane
+    scrolled up shows an old prompt box. `pane read` answers with the text
+    itself, not JSON."""
     binary = os.environ.get("HERDR_BIN_PATH") or "herdr"
-    source = ["--source", "recent", "--lines", str(int(rows))] if rows else ["--source", "visible"]
+    source = ["--source", "recent", "--lines", str(int(rows or RECENT_LINES))]
     try:
         out = subprocess.run([binary, "pane", "read", pane_id, *source, "--format", "ansi"],
                              capture_output=True, timeout=timeout)
@@ -138,24 +132,37 @@ def config_path():
         os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "herdr", "config.toml")
 
 
+_parsed = {}  # Herdr's config.toml, parsed once per process while it's unchanged
+
+
+def _herdr_config():
+    path = config_path()
+    try:
+        st = os.stat(path)
+        stamp = (path, st.st_size, st.st_mtime_ns)
+        if _parsed.get("stamp") != stamp:
+            with open(path, "rb") as f:
+                raw = f.read().decode("utf-8")
+            from . import config
+            data = config.tomllib.loads(raw) if config.tomllib else config.parse_simple_toml(raw, errors=[])
+            _parsed.clear()
+            _parsed.update(stamp=stamp, data=data)
+        return _parsed["data"]
+    except (OSError, UnicodeDecodeError, ValueError):
+        return {}
+
+
 def setting(table, key):
     """One value from Herdr's own config.toml (read only, never changed):
     `setting("ui.toast", "delivery")`. None when it's unset or unreadable."""
-    try:
-        with open(config_path(), "rb") as f:
-            raw = f.read().decode("utf-8")
-    except (OSError, UnicodeDecodeError):
-        return None
     from . import config
-    try:
-        if config.tomllib:
-            node = config.tomllib.loads(raw)
-            for part in table.split("."):
-                node = node.get(part) if isinstance(node, dict) else None
-        else:
-            node = config.parse_simple_toml(raw, errors=[]).get(table)
-    except (ValueError, AttributeError):
-        return None
+    data = _herdr_config()
+    if config.tomllib:
+        node = data
+        for part in table.split("."):
+            node = node.get(part) if isinstance(node, dict) else None
+    else:
+        node = data.get(table)
     return node.get(key) if isinstance(node, dict) else None
 
 

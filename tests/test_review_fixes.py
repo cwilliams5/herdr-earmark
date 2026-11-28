@@ -97,16 +97,19 @@ class OrderAndReportTests(unittest.TestCase):
         self.assertEqual([t["label"] for t in core.tab_layouts(s)["w1"]["tabs"]], ["notes", "outline"])
 
     def test_sidebar_reports_carry_their_sequence(self):
+        from earmark import sidebar
         index = {"sessions": {"default": {"panes": {}}}}
-        reports = core.pending_reports(index, {"entries": {}}, "default",
-                                       snap([], {"w1": "A", "w2": "B"}))
-        index["sessions"]["default"]["reported"] = {}
-        later = core.pending_reports(index, {"entries": {}}, "default", snap([], {"w1": "A"}))
+        archive = {"entries": {f"claude:{n}": {"herdr_session": "default", "workspace_label": label,
+                                                "agent": "claude", "session_id": n} for n, label in (("a", "A"), ("b", "B"))}}
+        cache = {"sessions": {}}
+        reports = core.pending_reports(index, archive, "default", snap([], {"w1": "A", "w2": "B"}), None, cache)
+        cache["sessions"]["default"]["spaces"] = {}
+        later = core.pending_reports(index, archive, "default", snap([], {"w1": "A"}), None, cache)
         self.assertTrue(all(len(r) == 3 for r in reports))
         self.assertGreater(later[0][2], reports[0][2])
-        with mock.patch.object(herdr, "report_count") as send:
-            core.send_reports(reports)
-        self.assertEqual(send.call_args_list[0].args, reports[0])
+        with mock.patch.object(sidebar, "report") as send:
+            core.send_reports(reports, "default")
+        self.assertEqual(send.call_args_list[0].args, ("workspace",) + reports[0])
 
 
 class SafetyTests(unittest.TestCase):
@@ -207,7 +210,7 @@ class StoreTests(TempState):
         self.assertEqual(len(damaged), 2)
 
     def test_failed_write_leaves_no_temp_file(self):
-        with mock.patch.object(json, "dump", side_effect=OSError("disk full")):
+        with mock.patch.object(store.os, "fsync", side_effect=OSError("disk full")):
             with self.assertRaises(OSError):
                 store.save_archive({"entries": {}})
         self.assertEqual([n for n in os.listdir(store.state_dir()) if n.startswith(".archive")], [])

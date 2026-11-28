@@ -1619,21 +1619,23 @@ if w:
 ```
 
 ### r2-fit: sidebar tokens resent on every hook
-file: earmark/core.py
+file: earmark/sidebar.py
 ```old
-        if sent.get(wid) != text:
+    return dict(tokens) if any(k not in sent or sent[k] != v for k, v in tokens.items()) else {}
 ```
 ```new
-        if True:
+    return dict(tokens)
 ```
 
 ### r2-fit: index rewritten on every hook (R23)
 file: earmark/core.py
 ```old
+            retire_notes(archive, session, t)
         if json.dumps(index, sort_keys=True) != before:
             store.save_index(index)
 ```
 ```new
+            retire_notes(archive, session, t)
         if True:
             store.save_index(index)
 ```
@@ -1641,11 +1643,13 @@ file: earmark/core.py
 ### r2-fit: restart resets reported tokens never
 file: earmark/core.py
 ```old
-        s["reported"] = {wid: "" for wid in snap["workspaces"]}
+        mine.clear()
+        mine["boot"] = s.get("boot")
 ```
 ```new
-        pass
+        mine["boot"] = s.get("boot")
 ```
+
 ### r2-fit: closed workspace keeps no record when its tabs were plain
 file: earmark/core.py
 ```old
@@ -1861,13 +1865,11 @@ file: earmark/ui.py
 ### r2-fit: herdr: pane read of the scrollback, not the screen
 file: earmark/herdr.py
 ```old
-"--source", "visible"
+str(int(rows or RECENT_LINES))]
 ```
 ```new
-"--source", "recent"
+str(int(RECENT_LINES))]
 ```
-
-<!-- Strict review 2: one per fix (R27-R51). -->
 
 ### R27 Herdr's restore goes first after a restart
 file: earmark/suspend.py
@@ -2541,12 +2543,12 @@ file: earmark/core.py
 ### r3-fit: closed-workspaces-never-age-out-by-default
 file: earmark/core.py
 ```old
-days = cfg["keep_days"] if cfg["keep_days"] is not None else config.FALLBACK_DAYS
-        if days and t - closed[key]
+        days = cfg["keep_days"] if cfg["keep_days"] is not None else config.FALLBACK_DAYS
+        if closed[key].get("note")
 ```
 ```new
-days = cfg["keep_days"]
-        if days and t - closed[key]
+        days = cfg["keep_days"]
+        if closed[key].get("note")
 ```
 
 ### r3-fit: restore-ignores-registry
@@ -2990,10 +2992,10 @@ if False:
 ### r3-fit: sidebar-seq-zero
 file: earmark/core.py
 ```old
-out.append((wid, text, time.time_ns()))
+            out.append((wid, delta, time.time_ns()))
 ```
 ```new
-out.append((wid, text, 0))
+            out.append((wid, delta, 0))
 ```
 
 ### r3-fit: settle-now-never-saves
@@ -3400,12 +3402,12 @@ file: earmark/herdr.py
 ```
 
 ### r4-fit: herdr: zero count never clears the token
-file: earmark/herdr.py
+file: earmark/sidebar.py
 ```old
-    args += ["--token", f"earmark={text}"] if text else ["--clear-token", "earmark"]
+    return {PREFIX + item: shown.get(item) for item in config.COUNT_ITEMS}
 ```
 ```new
-    args += ["--token", f"earmark={text}"]
+    return {PREFIX + item: text for item, text in shown.items()}
 ```
 
 ### r4-fit: config: idle_minutes 0 accepted
@@ -3509,12 +3511,12 @@ file: earmark/core.py
 ```
 
 ### r4-fit: core: zero count text
-file: earmark/core.py
+file: earmark/sidebar.py
 ```old
-    return f"{n} archived" if n else ""
+for i in show if values.get(i)]
 ```
 ```new
-    return f"{n} archived"
+for i in show]
 ```
 
 ### r4-fit: core: reopen ignores the label check on the id
@@ -3535,16 +3537,6 @@ file: earmark/core.py
                 if False:
 ```
 
-### r4-fit: core: report_count off still reports
-file: earmark/core.py
-```old
-        if cfg["report_count"]:
-            reports = pending_reports(index, archive, session, snap)
-```
-```new
-        if True:
-            reports = pending_reports(index, archive, session, snap)
-```
 ### r4-fit: core: focus stamp every hook
 file: earmark/core.py
 ```old
@@ -4288,18 +4280,12 @@ file: earmark/store.py
 ### r5-fit: store: shared lock for read-modify-write
 file: earmark/store.py
 ```old
-    with os.fdopen(fd, "r+") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        try:
-            yield
-
+        if timeout is None:
+            fcntl.flock(f, fcntl.LOCK_EX)
 ```
 ```new
-    with os.fdopen(fd, "r+") as f:
-        fcntl.flock(f, fcntl.LOCK_SH)
-        try:
-            yield
-
+        if timeout is None:
+            fcntl.flock(f, fcntl.LOCK_SH)
 ```
 
 ### r5-fit: store: state dir world-readable
@@ -4338,10 +4324,10 @@ file: earmark/herdr.py
 ### r5-fit: herdr: dotted table lookup broken
 file: earmark/herdr.py
 ```old
-            for part in table.split("."):
+        for part in table.split("."):
 ```
 ```new
-            for part in [table]:
+        for part in [table]:
 ```
 
 ### r5-fit: config: quote tracking in comments
@@ -5073,10 +5059,10 @@ file: earmark/herdr.py
 ### r5-fit: herdr: screen read from recent output
 file: earmark/herdr.py
 ```old
-    source = ["--source", "recent", "--lines", str(int(rows))] if rows else ["--source", "visible"]
+    source = ["--source", "recent", "--lines", str(int(rows or RECENT_LINES))]
 ```
 ```new
-    source = ["--source", "recent"] if rows else ["--source", "visible"]
+    source = ["--source", "recent"]
 ```
 
 ### r5-fit: store: debug log world-readable
@@ -5091,10 +5077,14 @@ file: earmark/store.py
 ### r5-fit: store: try_lock blocks
 file: earmark/store.py
 ```old
+        try:
             fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
 ```
 ```new
+        try:
             fcntl.flock(f, fcntl.LOCK_EX)
+        except OSError:
 ```
 
 ### r5-fit: core: session wait never ends early
@@ -6156,15 +6146,12 @@ file: earmark/ui.py
 ### r6-fit: store_no_lock
 file: earmark/store.py
 ```old
-        fcntl.flock(f, fcntl.LOCK_EX)
-        try:
-            yield
-
+        if timeout is None:
+            fcntl.flock(f, fcntl.LOCK_EX)
 ```
 ```new
-        try:
-            yield
-
+        if timeout is None:
+            pass
 ```
 
 ### r6-fit: agents_sgr_operands
@@ -6178,11 +6165,11 @@ file: earmark/agents.py
 ### r6-fit: text_combining_one
 file: earmark/text.py
 ```old
-    if unicodedata.combining(ch):
+    if unicodedata.combining(ch) or ch in "\u200b\u200c\u200d\ufe0e\ufe0f":  # marks, joiners, selectors
         return 0
 ```
 ```new
-    if unicodedata.combining(ch):
+    if unicodedata.combining(ch) or ch in "\u200b\u200c\u200d\ufe0e\ufe0f":  # marks, joiners, selectors
         return 1
 ```
 
@@ -6844,6 +6831,7 @@ file: earmark/core.py
 ```old
         if changed:
             store.save_archive(archive)
+            retire_notes(archive, session, t)
         if json.dumps(index, sort_keys=True) != before:
             store.save_index(index)
 ```
@@ -6852,6 +6840,7 @@ file: earmark/core.py
             store.save_index(index)
         if changed:
             store.save_archive(archive)
+            retire_notes(archive, session, t)
 ```
 
 ### R141 settle_now writes the archive first
@@ -7011,19 +7000,21 @@ file: earmark/suspend.py
 ### r7-fit: cost-index-before-empty
 file: earmark/core.py
 ```old
-before = json.dumps(index, sort_keys=True)
+        index, archive = store.load_index(), store.load_archive()
+        before = json.dumps(index, sort_keys=True)
 ```
 ```new
-before = ""
+        index, archive = store.load_index(), store.load_archive()
+        before = ""
 ```
 
 ### r7-fit: cost-report-off-clears-every-hook
 file: earmark/core.py
 ```old
-sent = index["sessions"][session].pop("reported", None) or {}
+    for wid, text in (s.pop("reported", None) or {}).items():
 ```
 ```new
-sent = index["sessions"][session].get("reported") or {}
+    for wid, text in (s.get("reported") or {}).items():
 ```
 
 ### r7-fit: cost-config-problem-logged-every-hook
@@ -7227,19 +7218,6 @@ else 0) > 6 * 3600:
 else 0) > 6 * 3600 * 10 ** 6:
 ```
 
-### r7-fit: counts-sent-when-off
-file: earmark/core.py
-```old
-    cfg = config.load()
-    if not cfg["report_count"]:
-        return
-```
-```new
-    cfg = config.load()
-    if False:
-        return
-```
-
 ### r7-fit: arm-line-safe-root-only
 file: earmark/suspend.py
 ```old
@@ -7410,10 +7388,10 @@ for ch in CONTROL.sub("", text):
 ### r7-fit: cfg-multiline-array-on-39
 file: earmark/config.py
 ```old
-while value.startswith("[") and "]" not in value and n < len(lines):
+        while value.startswith("[") and _open_brackets(value) > 0 and n < len(lines):
 ```
 ```new
-while False:
+        while False:
 ```
 
 ### r7-fit: counts-gone-workspaces-kept
@@ -8265,10 +8243,10 @@ file: earmark/agents.py
 ### r7-safety: r7b store: save without fsync rename (non-atomic write)
 file: earmark/store.py
 ```old
-        os.replace(tmp, os.path.join(directory, name))
+        os.replace(tmp, path)
 ```
 ```new
-        import shutil; shutil.copyfile(tmp, os.path.join(directory, name)); os.unlink(tmp)
+        import shutil; shutil.copyfile(tmp, path); os.unlink(tmp)
 ```
 
 ### r7-safety: last look: draft re-read dropped
@@ -8304,7 +8282,7 @@ file: earmark/suspend.py
 ### R150 screens are read from the bottom, not the scrolled-to part
 file: earmark/herdr.py
 ```old
-    source = ["--source", "recent", "--lines", str(int(rows))] if rows else ["--source", "visible"]
+    source = ["--source", "recent", "--lines", str(int(rows or RECENT_LINES))]
 ```
 ```new
     source = ["--source", "visible"]
@@ -8396,23 +8374,23 @@ if True:  # nothing else reads it
 ### r8-fit: m06 index.json written on every hook
 file: earmark/core.py
 ```old
+        store.save_sidebar(cache)
         if json.dumps(index, sort_keys=True) != before:
             store.save_index(index)
-    send_reports(reports)
 ```
 ```new
+        store.save_sidebar(cache)
         if True:
             store.save_index(index)
-    send_reports(reports)
 ```
 
 ### r8-fit: m08 restart re-sends clears for empty workspaces
-file: earmark/core.py
+file: earmark/sidebar.py
 ```old
-s["reported"] = {wid: "" for wid in snap["workspaces"]}
+        return {k: v for k, v in tokens.items() if v}
 ```
 ```new
-s["reported"] = {}
+        return dict(tokens)
 ```
 
 ### r8-fit: m09 a cut-off snapshot closes tabs
@@ -8434,23 +8412,23 @@ tab_id, pane_id = herdr.new_tab(target, tab.get("cwd"), label, focus=True)
 ```
 
 ### r8-fit: m13 '0 archived' token
-file: earmark/core.py
+file: earmark/sidebar.py
 ```old
-return f"{n} archived" if n else ""
+for i in show if values.get(i)]
 ```
 ```new
-return f"{n} archived"
+for i in show if i in values]
 ```
 
 ### r8-fit: m14 closed workspaces never pruned
 file: earmark/core.py
 ```old
         days = cfg["keep_days"] if cfg["keep_days"] is not None else config.FALLBACK_DAYS
-        if days and t - closed[key]
+        if closed[key].get("note")
 ```
 ```new
         days = cfg["keep_days"] if cfg["keep_days"] is not None else 0
-        if days and t - closed[key]
+        if closed[key].get("note")
 ```
 
 ### r8-fit: m15 process-info on every hook for unresolved Claude panes
@@ -8699,13 +8677,13 @@ file: earmark/suspend.py
         return False
 ```
 
-### r8-fit: m58 turning report_count off leaves the tokens shown
-file: earmark/core.py
+### r8-fit: m58 a count taken out of the list leaves its token shown
+file: earmark/sidebar.py
 ```old
-            reports = [(wid, "", time.time_ns()) for wid, text in sent.items() if text]
+    return {PREFIX + item: shown.get(item) for item in config.COUNT_ITEMS}
 ```
 ```new
-            reports = []
+    return {PREFIX + item: shown.get(item) for item in config.COUNT_ITEMS if item in shown}
 ```
 
 ### r8-fit: n02 restart detection given up after two parent changes
@@ -8778,17 +8756,6 @@ file: earmark/core.py
 ```
 ```new
                 if not elsewhere:
-```
-
-### r8-fit: n21 counts sent after reopen with report_count off
-file: earmark/core.py
-```old
-    cfg = config.load()
-    if not cfg["report_count"]:
-        return
-```
-```new
-    cfg = config.load()
 ```
 
 ### r8-fit: n23 wrapper (aws-vault exec) not a doubt
@@ -8870,12 +8837,10 @@ file: earmark/message.py
 ### r8-fit: n60 combining marks take a column
 file: earmark/text.py
 ```old
-    if unicodedata.combining(ch):
-        return 0
+    if unicodedata.combining(ch) or ch in
 ```
 ```new
-    if False:
-        return 0
+    if ch in
 ```
 
 ### r8-fit: n61 any agent's ' | ' title cut
@@ -9273,3 +9238,1663 @@ and r4-fit plant the confirm rule itself), r7-fit rule-bare-shell-looked-at
 (another refusal fires). r5-fit "bracketed paste left on" is gone with
 the code it planted in: the placeholder turns bracketed paste on itself
 (review 8 R158). -->
+
+### K1 snapshot panes from the agents list (agent panes only)
+file: earmark/herdr.py
+```old
+            "panes": {p["pane_id"]: p for p in snap["panes"]},
+```
+```new
+            "panes": {p["pane_id"]: p for p in snap["agents"]},
+```
+
+### K1 snapshot back to separate list calls
+file: earmark/herdr.py
+```old
+        snap = run("api", "snapshot")["snapshot"]
+```
+```new
+        snap = {"panes": run("pane", "list")["panes"], "workspaces": run("workspace", "list")["workspaces"], "tabs": run("tab", "list")["tabs"]}
+```
+
+### M3 no scrollbar column assumed
+file: earmark/sidebar.py
+```old
+DIVIDER, SCROLLBAR = 1, 1
+```
+```new
+DIVIDER, SCROLLBAR = 1, 0
+```
+
+### M3 workspace line right margin forgotten
+file: earmark/sidebar.py
+```old
+    return width - DIVIDER - SCROLLBAR - 2 - (1 if line == 0 else 3)
+```
+```new
+    return width - DIVIDER - SCROLLBAR - (1 if line == 0 else 3)
+```
+
+### M3 the state icon not counted
+file: earmark/sidebar.py
+```old
+        budget = space_line_width(width, 0) - 2 - text_width(label)  # the state icon and its space
+```
+```new
+        budget = space_line_width(width, 0) - text_width(label)
+```
+
+### M3 idle agents not counted as done
+file: earmark/sidebar.py
+```old
+        elif status in ("done", "idle"):
+```
+```new
+        elif status == "done":
+```
+
+### M3 a count that doesn't fit skipped, not the rest dropped
+file: earmark/sidebar.py
+```old
+        if used + need > budget:
+            break
+```
+```new
+        if used + need > budget:
+            continue
+```
+
+### M3 dragged width ignored
+file: earmark/sidebar.py
+```old
+    width = dragged or _int(herdr.setting("ui", "sidebar_width")) or DEFAULT_WIDTH
+```
+```new
+    width = _int(herdr.setting("ui", "sidebar_width")) or DEFAULT_WIDTH
+```
+
+### M3 width not clamped
+file: earmark/sidebar.py
+```old
+    return max(low, min(high, width))
+```
+```new
+    return width
+```
+
+### M3 a new boot keeps what the old one sent
+file: earmark/core.py
+```old
+    if mine.get("boot") != s.get("boot"):
+```
+```new
+    if False:
+```
+
+### M3 1.1's token never cleared
+file: earmark/core.py
+```old
+            delta[sidebar.LEGACY_TOKEN] = None
+```
+```new
+            pass
+```
+
+### M3 gone workspaces kept in the cache
+file: earmark/core.py
+```old
+    for wid in [wid for wid in sent if wid not in snap["workspaces"]]:
+        del sent[wid]
+```
+```new
+    for wid in []:
+        del sent[wid]
+```
+
+### M2 a retired setting breaks the config
+file: earmark/config.py
+```old
+        elif key in RETIRED:
+```
+```new
+        elif False:
+```
+
+### M2 context levels need not rise
+file: earmark/config.py
+```old
+    return value if all(a < b for a, b in zip(value, value[1:])) else None
+```
+```new
+    return value
+```
+
+### M2 a repeated count item allowed
+file: earmark/config.py
+```old
+    return value if len(set(value)) == len(value) else None
+```
+```new
+    return value
+```
+
+### M4 effort shortened first stage skipped
+file: earmark/sidebar.py
+```old
+    stages = [(model, effort), (model, short_effort(effort)), (short_model(model), short_effort(effort)),
+```
+```new
+    stages = [(model, effort), (short_model(model), short_effort(effort)),
+```
+
+### M4 context band off by one at a threshold
+file: earmark/sidebar.py
+```old
+    return 1 + sum(1 for t in levels if percent >= t)
+```
+```new
+    return 1 + sum(1 for t in levels if percent > t)
+```
+
+### M4 values not cleaned
+file: earmark/sidebar.py
+```old
+    text = "".join(ch for ch in str(text) if ch.isprintable() and ch not in "\r\n\t").strip()
+```
+```new
+    text = str(text).strip()
+```
+
+### M4 the percent dropped when nothing fits
+file: earmark/sidebar.py
+```old
+    return None, None, ctx
+
+```
+```new
+    return None, None, None
+
+```
+
+### M5 statusline output swallowed
+file: earmark/statusline.py
+```old
+    stdout.write(out)
+```
+```new
+    pass
+```
+
+### M5 statusline exit code lost
+file: earmark/statusline.py
+```old
+    else:
+        earmark_part(data, env)
+    return code
+```
+```new
+    else:
+        earmark_part(data, env)
+    return 0
+```
+
+### M5 a row kept after its agent left
+file: earmark/agentrow.py
+```old
+        if not p or p.get("agent") != rec.get("agent") or (live and rec.get("session_id") and live != rec["session_id"]):
+```
+```new
+        if not p or (live and rec.get("session_id") and live != rec["session_id"]):
+```
+
+### M5 a row kept for another session
+file: earmark/agentrow.py
+```old
+        if not p or p.get("agent") != rec.get("agent") or (live and rec.get("session_id") and live != rec["session_id"]):
+```
+```new
+        if not p or p.get("agent") != rec.get("agent"):
+```
+
+### M5 a restart not noticed
+file: earmark/agentrow.py
+```old
+            fresh = f.read().strip() != str(boot)
+```
+```new
+            fresh = False
+```
+
+### M5 a failed send forgotten
+file: earmark/agentrow.py
+```old
+                    again["sent"] = before
+```
+```new
+                    pass
+```
+
+### M5 files read every time
+file: earmark/agentrow.py
+```old
+    if same and cached.get("stamp") == stamp:
+```
+```new
+    if False:
+```
+
+### M5 Codex without its default effort
+file: earmark/agentrow.py
+```old
+    if not isinstance(effort, str):
+        effort = entry.get
+```
+```new
+    if False:
+        effort = entry.get
+```
+
+### M5 Earmark's failure breaks the status line
+file: earmark/statusline.py
+```old
+    except Exception as e:  # never the status line's problem
+```
+```new
+    except ValueError as e:
+```
+
+### M6 the user's own tables overwritten
+file: earmark/herdrconf.py
+```old
+    if own:
+        return "refused"
+```
+```new
+    if False:
+        return "refused"
+```
+
+### M6 a new problem kept
+file: earmark/herdrconf.py
+```old
+    if added:
+        now = _read(path)
+```
+```new
+    if False:
+        now = _read(path)
+```
+
+### M6 an old problem blocks writing
+file: earmark/herdrconf.py
+```old
+    added = _check_lines() - before
+```
+```new
+    added = _check_lines()
+```
+
+### M6 the first copy overwritten
+file: earmark/herdrconf.py
+```old
+    if text and not os.path.exists(link + BACKUP_SUFFIX):
+```
+```new
+    if text:
+```
+
+### M6 the file's mode not kept
+file: earmark/herdrconf.py
+```old
+    store.write_atomic(path, text, mode=_mode(path))
+```
+```new
+    store.write_atomic(path, text)
+```
+
+### M6 only the default session reloaded
+file: earmark/herdrconf.py
+```old
+        sessions = [s for s in json.loads(out.stdout).get("sessions", []) if s.get("running")]
+```
+```new
+        sessions = [{"default": True}]
+```
+
+### M6 a failure retried every hook
+file: earmark/herdrconf.py
+```old
+        if not now and want in (state.get("written"), state.get("failed")) and state.get("file") == _stamp():
+```
+```new
+        if not now and want == state.get("written") and state.get("file") == _stamp():
+```
+
+### M6 written while off
+file: earmark/herdrconf.py
+```old
+    if not cfg["sidebar"]["write_herdr_config"]:
+```
+```new
+    if cfg["sidebar"]["write_herdr_config"] is None:
+```
+
+### M7 the palette asked on every hook
+file: earmark/herdrconf.py
+```old
+        if state.get("stamp") != stamp or not isinstance(state.get("palette"), dict):
+```
+```new
+        if True:
+```
+
+### M7 theme names not resolved
+file: earmark/herdrconf.py
+```old
+        color = palette.get(name) or FALLBACK.get(name)
+```
+```new
+        color = None
+```
+
+### M6 dim left to Herdr
+file: earmark/herdrconf.py
+```old
+    parts.append(f"dim = {'true' if dim else 'false'}")
+```
+```new
+    parts.append("dim = true") if dim else None
+```
+
+### M6 broken markers guessed at
+file: earmark/herdrconf.py
+```old
+    if len(begins) != 1 or len(ends) != 1 or ends[0] < begins[0]:
+```
+```new
+    if not begins or not ends:
+```
+
+### L1 a closed workspace's note dropped
+file: earmark/core.py
+```old
+    if text.strip():
+        record["note"] = text
+```
+```new
+    if False:
+        record["note"] = text
+```
+
+### L1 a note file removed whatever it holds
+file: earmark/notes.py
+```old
+        if read(session, workspace_id) == text:
+```
+```new
+        if True:
+```
+
+### L1 a restored workspace without its note
+file: earmark/core.py
+```old
+            notes.put_back(herdr.session_name(), target, record["note"])
+```
+```new
+            pass
+```
+
+### L1 notes of other closes retired
+file: earmark/core.py
+```old
+        if rec.get("herdr_session") == session and rec.get("closed_at") == t and rec.get("note"):
+```
+```new
+        if rec.get("note"):
+```
+
+### L2 a write over a newer note
+file: earmark/notes.py
+```old
+        if expect is not None and version(read(session, workspace_id)) != expect:
+```
+```new
+        if False:
+```
+
+### L2 an empty note kept
+file: earmark/notes.py
+```old
+    if not text.strip():
+        with contextlib.suppress
+```
+```new
+    if False:
+        with contextlib.suppress
+```
+
+### L4 a busy Claude asked
+file: earmark/noteui.py
+```old
+        if status not in ("idle", "done"):
+```
+```new
+        if False:
+```
+
+### L4 unsent text ignored
+file: earmark/noteui.py
+```old
+        elif draft:
+```
+```new
+        elif False:
+```
+
+### L4 the skill not checked
+file: earmark/noteui.py
+```old
+        if not skill_installed((notes_of.get(pid) or {}).get("config_dir")):
+```
+```new
+        if False:
+```
+
+### L4 typed instead of Herdr's prompt
+file: earmark/noteui.py
+```old
+    herdr.run("agent", "prompt", pane_id, "/" + SKILL)
+```
+```new
+    herdr.run("pane", "send-text", pane_id, "/" + SKILL)
+```
+
+### L3 an emptied note kept
+file: earmark/noteui.py
+```old
+            notes.write(self.session, self.wid, edited, expect=notes.version(before), clear=True)
+```
+```new
+            notes.write(self.session, self.wid, edited if edited.strip() else before, expect=notes.version(before), clear=True)
+```
+
+### L6 no note mark
+file: earmark/core.py
+```old
+    return notes.noted(session)
+```
+```new
+    return set()
+```
+
+### L2 suspended tabs left out of the skill's tabs
+file: earmark/notes.py
+```old
+                     "state": "suspended" if rec else STATES.get(p.get("agent_status"), "unknown"),
+```
+```new
+                     "state": STATES.get(p.get("agent_status"), "unknown"),
+```
+
+### L2 the asking tab not marked
+file: earmark/notes.py
+```old
+                    "here": tid == here, "agents": found})
+```
+```new
+                    "here": False, "agents": found})
+```
+
+<!-- Strict review 9: one per finding (R168-R192) and both reviewers' survivors (R193). -->
+
+### R168 the launcher drops the user's status line once Earmark is gone
+file: earmark/launcher.py
+```old
+            '  if [ "$#" -gt 0 ]; then exec "$@"; fi\n'
+```
+```new
+            ''
+```
+
+### R168 the launcher never follows a new install folder
+file: earmark/launcher.py
+```old
+    if not _holds(launcher, want):
+```
+```new
+    if not os.path.exists(launcher):
+```
+
+### R168 the skill copy never refreshed
+file: earmark/launcher.py
+```old
+    if not _holds(copy, skill):
+```
+```new
+    if not os.path.exists(copy):
+```
+
+### R168 hooks don't keep the launcher
+file: earmark/core.py
+```old
+        launcher.ensure()
+```
+```new
+        pass
+```
+
+### R168 the theme hook points into the install folder
+file: earmark/herdrconf.py
+```old
+f"exec {shlex.quote(launcher.ensure())} rows --apply
+```
+```new
+f"exec python3 {shlex.quote(os.path.join(launcher.ROOT, 'earmark.py'))} rows --apply
+```
+
+### R169 lines Herdr's settings screen added inside the markers dropped
+file: earmark/herdrconf.py
+```old
+        return before + _foreign(old, ours) + new_block + after
+```
+```new
+        return before + new_block + after
+```
+
+### R169 a rollback keeps Earmark's own lines as foreign
+file: earmark/herdrconf.py
+```old
+        if line.rstrip("\n") not in mine:
+```
+```new
+        if True:
+```
+
+### R170 a symlinked config replaced by a plain file
+file: earmark/herdrconf.py
+```old
+    path = os.path.realpath(link)  # a symlink (stow, home-manager) stays one
+```
+```new
+    path = link
+```
+
+### R171 the dragged width looked for under the API socket's name
+file: earmark/sidebar.py
+```old
+os.path.join(folder, "herdr-client.sock")
+```
+```new
+os.path.join(folder, "herdr.sock")
+```
+
+### R171 the preferences file's hash not FNV-1a
+file: earmark/sidebar.py
+```old
+        h = ((h ^ byte) * 0x100000001b3) & 0xFFFFFFFFFFFFFFFF
+```
+```new
+        h = ((h + byte) * 0x100000001b3) & 0xFFFFFFFFFFFFFFFF
+```
+
+### R172 a read without the height follows the scroll
+file: earmark/herdr.py
+```old
+    source = ["--source", "recent", "--lines", str(int(rows or RECENT_LINES))]
+```
+```new
+    source = ["--source", "recent", "--lines", str(int(rows))] if rows else ["--source", "visible"]
+```
+
+### R172 u reads without the pane's height
+file: earmark/noteui.py
+```old
+rows=(p.get("scroll") or {}).get("viewport_rows")),
+```
+```new
+rows=None),
+```
+
+### R173 the pick sent without a second check
+file: earmark/noteui.py
+```old
+        if pane_id not in [pid for pid, _ in ready]:
+```
+```new
+        if False:
+```
+
+### R174 Earmark's part before the user's output
+file: earmark/statusline.py
+```old
+    code = own(command, data, stdout) if command else 0
+    stdout.flush()
+    if not env.get("HERDR_PANE_ID"):
+```
+```new
+    code = 0
+    if not env.get("HERDR_PANE_ID"):
+```
+
+### R174 Earmark's part not apart
+file: earmark/statusline.py
+```old
+        _apart(lambda: earmark_part(data, env))
+```
+```new
+        earmark_part(data, env)
+```
+
+### R174 the rows lock waits for ever
+file: earmark/agentrow.py
+```old
+    return store.flock(os.path.join(rows_dir(session), ".lock"), timeout=LOCK_WAIT)
+```
+```new
+    return store.flock(os.path.join(rows_dir(session), ".lock"))
+```
+
+### R186 a signal's exit code as Python's
+file: earmark/statusline.py
+```old
+    return 128 - child.returncode if child.returncode < 0 else child.returncode
+```
+```new
+    return child.returncode
+```
+
+### R175 a refit sends what the hook read before its loop
+file: earmark/agentrow.py
+```old
+                update(session, pane_id, None, cfg, width, fresh=fresh)
+```
+```new
+                update(session, pane_id, rec, cfg, width, fresh=fresh)
+```
+
+### R176 the user's own agent rows not refused
+file: earmark/herdrconf.py
+```old
+    for own in ("ui.sidebar.spaces", "ui.sidebar.agents.rows_by_agent", "ui.sidebar.agents.rows"):
+```
+```new
+    for own in ("ui.sidebar.spaces", "ui.sidebar.agents.rows_by_agent"):
+```
+
+### R176 lines inside a value read as keys
+file: earmark/herdrconf.py
+```old
+        if depth == 0:
+            m = _HEADER.match(line)
+```
+```new
+        if True:
+            m = _HEADER.match(line)
+```
+
+### R177 written over a change made while checking
+file: earmark/herdrconf.py
+```old
+    if _read(path) != text:  # someone saved it while Herdr checked it
+```
+```new
+    if False:
+```
+
+### R177 a rollback writes the whole old file
+file: earmark/herdrconf.py
+```old
+text if now == new else compose(now, _own_part(split(text)[1] or ""), ours=split(new)[1] or "")
+```
+```new
+text
+```
+
+### R178 a closed workspace's note expires
+file: earmark/core.py
+```old
+        if closed[key].get("note"):  # the user's own text: kept until they forget the workspace
+```
+```new
+        if False:
+```
+
+### R178 the list doesn't mark a note
+file: earmark/ui.py
+```old
+                secondary = "✎ note" if r.get("note") else ""
+```
+```new
+                secondary = ""
+```
+
+### R178 Forget doesn't mention the note
+file: earmark/ui.py
+```old
+            noted = self.view == "workspaces" and any(r["key"] == self.confirm and r.get("note") for r in self.rows)
+```
+```new
+            noted = False
+```
+
+### R179 the skill gets a transcript to open
+file: earmark/notes.py
+```old
+            if read_transcripts and path:
+```
+```new
+            if path:
+```
+
+### R179 Codex's injected context taken for a request
+file: earmark/agents.py
+```old
+                words = " ".join(t for t in texts if t.strip() and not t.lstrip().startswith("<")) or None
+```
+```new
+                words = " ".join(t for t in texts if t.strip()) or None
+```
+
+### R179 excerpts not cut
+file: earmark/agents.py
+```old
+    if len(text) <= n:
+        return text
+    head
+```
+```new
+    if True:
+        return text
+    head
+```
+
+### R180 the default session reloaded through the hook's socket
+file: earmark/herdrconf.py
+```old
+        name = "default" if s.get("default") else s.get("name", "")
+        args = [binary, "--session", name, "server", "reload-config"]
+```
+```new
+        args = [binary] + ([] if s.get("default") else ["--session", s.get("name", "")]) + ["server", "reload-config"]
+```
+
+### R181 a failed count report recorded as shown
+file: earmark/core.py
+```old
+                    spaces[wid] = {}
+```
+```new
+                    pass
+```
+
+### R182 only the changed tokens sent
+file: earmark/sidebar.py
+```old
+    return dict(tokens) if any(k not in sent or sent[k] != v for k, v in tokens.items()) else {}
+```
+```new
+    return {k: v for k, v in tokens.items() if sent.get(k) != v}
+```
+
+### R183 the theme hook writes with the setting off
+file: earmark/herdrconf.py
+```old
+    if not cfg["sidebar"]["write_herdr_config"]:
+        return "off"
+```
+```new
+    if False:
+        return "off"
+```
+
+### R183 the theme hook writes over a broken Earmark config
+file: earmark/herdrconf.py
+```old
+    if cfg.get("_broken"):
+        return "refused"
+```
+```new
+    if False:
+        return "refused"
+```
+
+### R184 an empty write removes the note
+file: earmark/notes.py
+```old
+    if not text.strip() and not clear:
+```
+```new
+    if False:
+```
+
+### R185 herdrconf.json rewritten on every hook
+file: earmark/herdrconf.py
+```old
+            if state != old:  # the palette, if the theme changed
+```
+```new
+            if True:
+```
+
+### R185 the boot mark rewritten on every hook
+file: earmark/agentrow.py
+```old
+    if fresh:
+        with contextlib.suppress(OSError):
+```
+```new
+    if True:
+        with contextlib.suppress(OSError):
+```
+
+### R185 Codex's database asked on every hook
+file: earmark/agentrow.py
+```old
+    source = cached.get("source") if same and os.path.isfile(
+```
+```new
+    source = cached.get("source") if False and os.path.isfile(
+```
+
+### R187 the first copy written in place
+file: earmark/herdrconf.py
+```old
+        store.write_atomic(link + BACKUP_SUFFIX, text, mode=_mode(path))
+```
+```new
+        shutil.copy2(path, link + BACKUP_SUFFIX)
+```
+
+### R189 an emoji presentation one column
+file: earmark/text.py
+```old
+        if ch == "\ufe0f" and last == 1:  # emoji presentation: wide
+```
+```new
+        if False:
+```
+
+### R189 a joined emoji counted per person
+file: earmark/text.py
+```old
+            joined = last > 0
+```
+```new
+            joined = False
+```
+
+### R189 a skin tone counted
+file: earmark/text.py
+```old
+        if "\U0001f3fb" <= ch <= "\U0001f3ff" and last:  # a skin tone on the emoji before it
+```
+```new
+        if False:
+```
+
+### R190 check hides the last write
+file: earmark.py
+```old
+    if cfg["sidebar"]["write_herdr_config"] and isinstance(last, dict) and last.get("status") not in ("written", "unchanged"):
+```
+```new
+    if False:
+```
+
+### R192 percent of infinity
+file: earmark/sidebar.py
+```old
+    if not (0 < window < float("inf") and 0 <= used < float("inf")):  # NaN fails every comparison
+```
+```new
+    if not (window > 0 and used >= 0) or used != used or window != window:
+```
+
+### R192 a theme hook without Omarchy
+file: earmark/herdrconf.py
+```old
+    if not os.path.isdir(os.path.expanduser("~/.config/omarchy")):
+        return None
+```
+```new
+    if False:
+        return None
+```
+
+### R192 an empty last piece of a wrap
+file: earmark/noteui.py
+```old
+    if line or not pieces:
+        pieces.append(line)
+```
+```new
+    if True:
+        pieces.append(line)
+```
+
+### R193 hooks never refit agent rows
+file: earmark/core.py
+```old
+        agentrow.refresh(session, snap, cfg, index["sessions"][session].get("boot"))
+```
+```new
+        pass
+```
+
+### R193 hooks never keep Herdr's config
+file: earmark/core.py
+```old
+        herdrconf.keep_current(cfg)
+```
+```new
+        pass
+```
+
+### R193 the hook never retires a closed workspace's note
+file: earmark/core.py
+```old
+            retire_notes(archive, session, t)
+```
+```new
+            pass
+```
+
+### R193 Grok panes never read
+file: earmark/agentrow.py
+```old
+        if agent not in ("codex", "grok") or not isinstance(sid, str) or not sid:
+```
+```new
+        if agent not in ("codex",) or not isinstance(sid, str) or not sid:
+```
+
+### R193 Grok's signals.json change unnoticed
+file: earmark/agentrow.py
+```old
+        [source] + [os.path.join(os.path.dirname(source), n) for n in ("signals.json", "prompt_context.json")]
+```
+```new
+        [source]
+```
+
+### R193 an older Codex turn wins
+file: earmark/agentrow.py
+```old
+        if not have_turn and record.get("type") == "turn_context":
+```
+```new
+        if record.get("type") == "turn_context":
+```
+
+### R193 the status line ignores HERDR_SESSION
+file: earmark/agentrow.py
+```old
+        session = env.get("HERDR_SESSION") or "default"
+        cfg = config.load()
+```
+```new
+        session = "default"
+        cfg = config.load()
+```
+
+### R193 agent rows with a fixed seq
+file: earmark/agentrow.py
+```old
+        seq = time.time_ns()
+    if delta:
+```
+```new
+        seq = 1
+    if delta:
+```
+
+### R193 values not cut to 40
+file: earmark/sidebar.py
+```old
+    return text[:limit]
+```
+```new
+    return text
+```
+
+### R193 counts on their own line measured as the name's
+file: earmark/sidebar.py
+```old
+        budget = space_line_width(width, 1)
+```
+```new
+        budget = space_line_width(width, 0)
+```
+
+### R193 separators uncounted on their own line
+file: earmark/sidebar.py
+```old
+        need = text_width(text) + (len(SEPARATOR) if line == "same" or out else 0)
+```
+```new
+        need = text_width(text) + (len(SEPARATOR) if line == "same" else 0)
+```
+
+### R193 reports under another source
+file: earmark/sidebar.py
+```old
+    args = [kind, "report-metadata", target, "--source", PLUGIN_ID, "--seq", str(seq)]
+```
+```new
+    args = [kind, "report-metadata", target, "--source", "earmark", "--seq", str(seq)]
+```
+
+### R193 not reloaded recorded as a failure
+file: earmark/herdrconf.py
+```old
+        if status in ("written", "unchanged", "not reloaded"):
+```
+```new
+        if status in ("written", "unchanged"):
+```
+
+### R193 a same-size theme switch unnoticed
+file: earmark/herdrconf.py
+```old
+    return [os.path.realpath(path), st.st_size, st.st_mtime_ns]
+```
+```new
+    return [os.path.realpath(path), st.st_size]
+```
+
+### R193 a restored note put back twice
+file: earmark/notes.py
+```old
+        if now.strip() and now.strip() != text.strip():
+```
+```new
+        if now.strip():
+```
+
+### R193 the note CLI ignores HERDR_SESSION
+file: earmark/notes.py
+```old
+            "session": os.environ.get("HERDR_SESSION") or "default", "expect": None,
+```
+```new
+            "session": "default", "expect": None,
+```
+
+### R193 the popup's wrap ignores spaces
+file: earmark/noteui.py
+```old
+        at = space if space > width // 3 else cut
+```
+```new
+        at = cut
+```
+
+### R193 0 picks the last Claude
+file: earmark/noteui.py
+```old
+            elif isinstance(key, str) and key.isdigit() and 1 <= int(key) <= len(self.picking):
+```
+```new
+            elif isinstance(key, str) and key.isdigit() and int(key) <= len(self.picking):
+```
+
+### R193 the wheel down scrolls up
+file: earmark/noteui.py
+```old
+        if b & BUTTON5_PRESSED:
+            self.top += 3
+```
+```new
+        if b & BUTTON5_PRESSED:
+            self.top = max(0, self.top - 3)
+```
+
+### R193 a click anywhere presses the buttons
+file: earmark/noteui.py
+```old
+        if b & (curses.BUTTON1_CLICKED | curses.BUTTON1_PRESSED) and y == scr.getmaxyx()[0] - 1:
+```
+```new
+        if b & (curses.BUTTON1_CLICKED | curses.BUTTON1_PRESSED):
+```
+
+### R193 no reload while the popup is open
+file: earmark/noteui.py
+```old
+            except curses.error:
+                self.load()
+```
+```new
+            except curses.error:
+                pass
+```
+
+### R193 outside changes reloaded once
+file: earmark/noteui.py
+```old
+        if stamp != self.stamp:
+            self.note, self.stamp
+```
+```new
+        if stamp != self.stamp and self.stamp is None:
+            self.note, self.stamp
+```
+
+### R193 a checked box only in lower case
+file: earmark/noteui.py
+```old
+            elif stripped[:6].lower() in ("- [x] ", "* [x] "):
+```
+```new
+            elif stripped[:6] in ("- [x] ", "* [x] "):
+```
+
+### R193 suspended tabs counted once per workspace
+file: earmark/core.py
+```old
+        suspended[wid] = suspended.get(wid, 0) + 1
+```
+```new
+        suspended[wid] = 1
+```
+
+### R193 a snapshot without panes read as none
+file: earmark/herdr.py
+```old
+            "panes": {p["pane_id"]: p for p in snap["panes"]},
+```
+```new
+            "panes": {p["pane_id"]: p for p in snap.get("panes", [])},
+```
+
+### R193 a snapshot's tabs out of order
+file: earmark/herdr.py
+```old
+            "tabs": {t["tab_id"]: t for t in snap["tabs"]},
+```
+```new
+            "tabs": {t["tab_id"]: t for t in reversed(snap["tabs"])},
+```
+
+### R193 an empty context colour list accepted
+file: earmark/config.py
+```old
+            if isinstance(v, list) and 1 <= len(v) <= MAX_LEVELS + 1 and
+```
+```new
+            if isinstance(v, list) and len(v) <= MAX_LEVELS + 1 and
+```
+
+### R193 joiners and selectors take a column
+file: earmark/text.py
+```old
+    if unicodedata.combining(ch) or ch in "\u200b\u200c\u200d\ufe0e\ufe0f":  # marks, joiners, selectors
+```
+```new
+    if unicodedata.combining(ch):
+```
+
+### R193 keep_current ignores its lock
+file: earmark/herdrconf.py
+```old
+        if not mine_now:
+            return "busy"
+```
+```new
+        if False:
+            return "busy"
+```
+
+### R193 a note written without its lock
+file: earmark/notes.py
+```old
+    with _locked(session):
+        if expect is not None
+```
+```new
+    with contextlib.nullcontext():
+        if expect is not None
+```
+
+### R183 rows --apply skips the setting
+file: earmark.py
+```old
+        status, detail = herdrconf.keep_current(cfg, now=True)
+```
+```new
+        status, detail = herdrconf.apply(cfg, palette)
+```
+
+### R185 Herdr's config parsed on every call
+file: earmark/herdr.py
+```old
+        if _parsed.get("stamp") != stamp:
+```
+```new
+        if True:
+```
+
+### R179 requests looked for in the last chunk only
+file: earmark/agents.py
+```old
+        while pos > 0 and read < SCAN_LIMIT:
+```
+```new
+        while pos > 0 and read < (1 << 20):
+```
+
+### R179 replies newest first
+file: earmark/agents.py
+```old
+    return {"requests": requests[::-1], "replies": replies[::-1],
+```
+```new
+    return {"requests": requests[::-1], "replies": replies,
+```
+
+### R179 tools from before the last request counted
+file: earmark/agents.py
+```old
+        if not requests:  # since the last request
+```
+```new
+        if True:
+```
+
+### R179 a message sent twice takes two places
+file: earmark/agents.py
+```old
+        if asked and len(requests) < REQUESTS and (not requests or requests[-1] != _start(asked, REQUEST_CHARS)):
+```
+```new
+        if asked and len(requests) < REQUESTS:
+```
+
+### R179 a reply's closing sources kept
+file: earmark/agents.py
+```old
+    if cut > len(text) * 0.4:
+```
+```new
+    if False:
+```
+
+### R179 a long reply's start dropped
+file: earmark/agents.py
+```old
+    return text[:head].rstrip() + " … " + text[-(n - head - 3):].lstrip()
+```
+```new
+    return text[-n:]
+```
+
+### R179 Codex's tools not named
+file: earmark/agents.py
+```old
+            elif payload.get("type") in ("function_call", "custom_tool_call") and isinstance(payload.get("name"), str):
+```
+```new
+            elif False:
+```
+
+### R179 read_transcripts never read
+file: earmark/config.py
+```old
+    if isinstance(data.get("notes"), dict) and isinstance(data["notes"].get("read_transcripts"), bool):
+```
+```new
+    if False:
+```
+
+### R179 a bad read_transcripts value accepted
+file: earmark/config.py
+```old
+                        if k not in NOTES_DEFAULTS or not isinstance(v, bool)]
+```
+```new
+                        if k not in NOTES_DEFAULTS]
+```
+
+<!-- Strict review 10: one per finding (R194-R208) and both reviewers' survivors (R210). -->
+
+### R194 task results taken for requests
+file: earmark/agents.py
+```old
+"<task-notification",
+```
+```new
+
+```
+
+### R194 shell output taken for requests
+file: earmark/agents.py
+```old
+"<bash-input", "<bash-stdout", "<bash-stderr",
+```
+```new
+
+```
+
+### R195 a rollback repeats a moved key
+file: earmark/herdrconf.py
+```old
+compose(now, _own_part(split(text)[1] or ""), ours=split(new)[1] or "")
+```
+```new
+compose(now, split(text)[1] or "", ours=split(new)[1] or "")
+```
+
+### R196 dark-theme pastels without Omarchy
+file: earmark/herdrconf.py
+```old
+FALLBACK = {"red": "#d0453d", "yellow": "#a77d00",
+```
+```new
+FALLBACK = {"foreground": "#cdd6f4", "red": "#d0453d", "yellow": "#f9e2af",
+```
+
+### R196 the soft text colours not dimmed
+file: earmark/herdrconf.py
+```old
+        dim = dim or (color is None and name in SOFT)
+```
+```new
+        pass
+```
+
+### R197 any Claude writes the pane's line
+file: earmark/agentrow.py
+```old
+        if cfg["sidebar"]["agent_row"] and pane_is_ours(session, pane, values.get("session_id")):
+```
+```new
+        if cfg["sidebar"]["agent_row"]:
+```
+
+### R197 Herdr asked on every refresh
+file: earmark/agentrow.py
+```old
+    if load(session, pane).get("session_id") == session_id:
+        return True
+```
+```new
+    if False:
+        return True
+```
+
+### R197 the pane's session not compared
+file: earmark/agentrow.py
+```old
+    return live == session_id
+```
+```new
+    return True
+```
+
+### R198 a recreated session keeps the old notes on new ids
+file: earmark/core.py
+```old
+                changed |= record_closed_workspace(archive, session, wid, layout, t)
+            s["layouts"] = {}
+```
+```new
+                pass
+            s["layouts"] = {}
+```
+
+### R199 a failed write tried every hook
+file: earmark/herdrconf.py
+```old
+            status, detail = "refused", f"can't write Herdr's config.toml: {e}"
+```
+```new
+            raise
+```
+
+### R199 an unanswered first check taken as fine
+file: earmark/herdrconf.py
+```old
+        return "busy", f"Herdr's config check didn't answer ({e}); tried again later"
+```
+```new
+        before = set()
+```
+
+### R199 an unanswered second check taken as fine
+file: earmark/herdrconf.py
+```old
+        added = {f"Herdr's config check didn't answer ({e})"}
+```
+```new
+        added = set()
+```
+
+### R200 the launcher says nothing once Earmark is gone
+file: earmark/launcher.py
+```old
+            "exit 1\n")
+```
+```new
+            "exit 0\n")
+```
+
+### R201 the editor on the note itself
+file: earmark/noteui.py
+```old
+                subprocess.call(argv + [copy])
+```
+```new
+                subprocess.call(argv + [self.path])
+```
+
+### R201 an edit over a note written meanwhile
+file: earmark/noteui.py
+```old
+            notes.write(self.session, self.wid, edited, expect=notes.version(before), clear=True)
+```
+```new
+            notes.write(self.session, self.wid, edited, clear=True)
+```
+
+### R202 the counts before the suspend side
+file: earmark/core.py
+```old
+        if wake:
+            suspend.wake_on_view(session, wake)
+    except Exception as e:
+        print(f"earmark: suspend: {e!r}", file=sys.stderr)
+    send_reports(reports, session)
+```
+```new
+        send_reports(reports, session)
+        if wake:
+            suspend.wake_on_view(session, wake)
+    except Exception as e:
+        print(f"earmark: suspend: {e!r}", file=sys.stderr)
+```
+
+### R203 a removed block never restored
+file: earmark/herdrconf.py
+```old
+state.get("failed")) and state.get("file") == _stamp():
+```
+```new
+state.get("failed")):
+```
+
+### R204 multi-line strings not followed
+file: earmark/herdrconf.py
+```old
+        if opener:
+            quote = opener[1]
+```
+```new
+        if False:
+            quote = opener[1]
+```
+
+### R205 a row on its own line read as a table
+file: earmark/config.py
+```old
+        while value.startswith("[") and _open_brackets(value) > 0 and n < len(lines):
+```
+```new
+        while value.startswith("[") and "]" not in value and n < len(lines):
+```
+
+### R206 written into a file that doesn't parse
+file: earmark/herdrconf.py
+```old
+    if not _parses(text):  # Herdr's check stops at the first error: one there would hide a new one
+```
+```new
+    if False:
+```
+
+### R207 every Claude forks
+file: earmark/statusline.py
+```old
+    if not env.get("HERDR_PANE_ID"):  # a Claude outside Herdr: nothing for Earmark to do
+        return code
+```
+```new
+    if False:
+        return code
+```
+
+### R208 the theme from XDG_STATE_HOME
+file: earmark/herdrconf.py
+```old
+    return os.path.expanduser("~/.local/state/omarchy/current/theme/colors.toml")  # Omarchy's own path, not XDG
+```
+```new
+    return os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "omarchy", "current", "theme", "colors.toml")
+```
+
+### R208 agent rows turned off keep showing
+file: earmark/agentrow.py
+```old
+        for pane_id, rec in cached_panes(session).items():
+            try:
+                clear(session, pane_id, rec, alive=pane_id in snap["panes"])
+```
+```new
+        for pane_id, rec in []:
+            try:
+                clear(session, pane_id, rec, alive=pane_id in snap["panes"])
+```
+
+### R210 Codex context from the oldest token count
+file: earmark/agentrow.py
+```old
+        elif not have_tokens and record.get("type") == "event_msg"
+```
+```new
+        elif record.get("type") == "event_msg"
+```
+
+### R210 busy recorded as a failure
+file: earmark/herdrconf.py
+```old
+        elif status != "busy":
+```
+```new
+        else:
+```
+
+### R210 a digit past the picker
+file: earmark/noteui.py
+```old
+key.isdigit() and 1 <= int(key) <= len(self.picking):
+```
+```new
+key.isdigit() and 1 <= int(key):
+```
+
+### R210 the status line ignores agent_row off
+file: earmark/agentrow.py
+```old
+        if cfg["sidebar"]["agent_row"] and pane_is_ours(
+```
+```new
+        if pane_is_ours(
+```
+
+### R210 a label measured with len
+file: earmark/sidebar.py
+```old
+        budget = space_line_width(width, 0) - 2 - text_width(label)
+```
+```new
+        budget = space_line_width(width, 0) - 2 - len(label)
+```
+
+### R210 the percent floored
+file: earmark/agentrow.py
+```old
+    percent = int(round(used)) if used is not None and used >= 0 else
+```
+```new
+    percent = int(used) if used is not None and used >= 0 else
+```
+
+### R210 a status line with nothing to show sent
+file: earmark/agentrow.py
+```old
+    if values and (values.get("model") or values.get("percent") is not None):
+        session = env.get("HERDR_SESSION")
+```
+```new
+    if values:
+        session = env.get("HERDR_SESSION")
+```
+
+### R210 the launcher's root unquoted
+file: earmark/launcher.py
+```old
+            f"root={shlex.quote(root)}\n"
+```
+```new
+            f"root={root}\n"
+```
+
+### R210 Earmark's part in the status line's session
+file: earmark/statusline.py
+```old
+        os.setsid()
+
+```
+```new
+
+```
+
+### R210 an empty note file counts as a note
+file: earmark/notes.py
+```old
+                if os.path.getsize(os.path.join(notes_dir(session), name)) > 0:
+```
+```new
+                if True:
+```
+
+### R210 note files retired before the archive is saved
+file: earmark/core.py
+```old
+        if changed:
+            store.save_archive(archive)
+            retire_notes(archive, session, t)
+```
+```new
+        if changed:
+            retire_notes(archive, session, t)
+            store.save_archive(archive)
+```
+
+### R210 a failed put back ignored
+file: earmark/core.py
+```old
+            return f"the workspace is back, but its note couldn't be written ({e}); it stays in the list"
+```
+```new
+            pass
+```
